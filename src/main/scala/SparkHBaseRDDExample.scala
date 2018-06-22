@@ -29,11 +29,11 @@ object SparkHBaseRDDExample {
 
     //take 2 result to print
     orig_rdd.take(2).foreach{
-      case (r, x) =>
+      case (row, raw_packet) =>
         println("rowkey:")
-        println(r.map(x => (x & 0x00ff).toHexString).mkString(" "))
+        println(row.map(x => (x & 0x00ff).toHexString).mkString(" "))
         println("raw packet:")
-        println(x.map(x => (x & 0x00ff).toHexString).mkString(" "))
+        println(raw_packet.map(x => (x & 0x00ff).toHexString).mkString(" "))
     }
 
     if (! admin.tableExists(TableName.valueOf("dummytestt:t")))
