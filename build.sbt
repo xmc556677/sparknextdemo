@@ -17,7 +17,6 @@ libraryDependencies ++= Seq(
   "org.apache.hbase" % "hbase-common" % "1.3.1" ,
   "org.apache.hbase" % "hbase-client" % "1.3.1",
   "eu.unicredit" %% "hbase-rdd" % "0.8.0",
-  "it.nerdammer.bigdata" % "spark-hbase-connector_2.11" % "1.0.4" from "file:///home/xmccc/IdeaProjects/spark-hbase-connector/target/pack/lib/spark-hbase-connector_2.11-1.0.4.jar",
   "org.pcap4j" % "pcap4j-core" % "1.7.2",
   "org.pcap4j" % "pcap4j-packetfactory-static" % "1.7.2",
   "org.msgpack" %% "msgpack-scala" % "0.8.13",

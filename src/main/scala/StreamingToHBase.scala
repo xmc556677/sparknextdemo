@@ -30,10 +30,10 @@ object StreamingToHBase {
 
     val batch_duration = 10
     val kafka_topic = "pcap10"
-    val kafka_servers = "192.168.0.145,192.168.0.146"
+    val kafka_servers = "192.168.0.145:9092,192.168.0.146:9092"
     val save_table = "xmc:raw_packets_2gb"
 
-    if (admin.tableExists(TableName.valueOf(save_table)))
+    if (! admin.tableExists(TableName.valueOf(save_table)))
       createPresplitTable(save_table)
 
     val ssc = new StreamingContext(sparkSession.sparkContext, Seconds(batch_duration))
@@ -87,7 +87,7 @@ object StreamingToHBase {
       table_presplit,
       HBaseUtil.getHexSplits(
         Array.fill(16)(0.toByte),
-        Array.fill(16)(255.toByte),
+        Array.fill(16)(254.toByte),
         15
       )
     )

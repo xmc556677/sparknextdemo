@@ -10,8 +10,7 @@
     </property>
     <property>
         <name>hbase.zookeeper.quorum</name>
-        <!--<value>hmaster.hbase,hslave04.hbase,hslave08.hbase,hslave12.hbase,hslave15.hbase</value>-->
-        <value>hmaster.hbase</value>
+        <value>hmaster.hbase,hslave04.hbase,hslave08.hbase,hslave12.hbase,hslave15.hbase</value>
     </property>
     <property>
         <name>mapreduce.output.fileoutputformat.outputdir</name>
