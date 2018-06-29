@@ -22,7 +22,7 @@ object ExtractSessionFeature {
       .getOrCreate()
 
     val input_table = "xmc:sessions_2gb"
-    val save_table = "xmc:sessn_feature_2gb"
+    val save_table = "xmc:sessn_feature_2gb_p"
 
     val input_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Array[Byte], Array[Byte], Array[Byte])](input_table)
       .select("sid", "t", "r" )
@@ -54,7 +54,7 @@ object ExtractSessionFeature {
         val sessn_dur = tss.max - tss.min
         val pkg_cnt = pkts.length
 
-        (rowkey, avg_pkt_len, min_pkt_len, max_pkt_len, ensureXByte(sessn_dur.toByteArray, 4), pkg_cnt)
+        (rowkey, avg_pkt_len.toString, min_pkt_len.toString, max_pkt_len.toString, sessn_dur.toString, pkg_cnt.toString)
     }
 
     save_rdd

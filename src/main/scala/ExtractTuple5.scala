@@ -24,7 +24,7 @@ object ExtractTuple5 {
       .getOrCreate()
 
     val input_table = "xmc:rawpackets_2gb"
-    val save_table = "xmc:tuple5_2gb"
+    val save_table = "xmc:tuple5_2gb_p"
     val input_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Array[Byte], Array[Byte])](input_table)
       .select("r", "t" )
       .inColumnFamily("p")
@@ -39,16 +39,16 @@ object ExtractTuple5 {
           val ipv4 = eth.get(classOf[IpV4Packet])
           val ipv4h = ipv4.getHeader
 
-          val dip = ipv4h.getDstAddr.getAddress
-          val sip = ipv4h.getSrcAddr.getAddress
-          val proto = Array.fill(1)(ipv4h.getProtocol.value.toByte)
+          val dip = ipv4h.getDstAddr.toString
+          val sip = ipv4h.getSrcAddr.toString
+          val proto = ipv4h.getProtocol.toString
 
           val tcp = ipv4.get(classOf[TcpPacket])
           val tcph = tcp.getHeader
-          val dport = Bytes.toBytes(tcph.getDstPort.value)
-          val sport = Bytes.toBytes(tcph.getSrcPort.value)
+          val dport = tcph.getDstPort.toString
+          val sport = tcph.getSrcPort.toString
 
-          (rowkey, dip, sip, dport, sport, proto, raw_packet, ts_byte)
+          (rowkey, dip, sip, dport, sport, proto, raw_packet, BigInt(Array(0.toByte) ++ ts_byte).toString)
         } toOption
 
         val udp_tuple5 = Try {
@@ -56,16 +56,16 @@ object ExtractTuple5 {
           val ipv4 = eth.get(classOf[IpV4Packet])
           val ipv4h = ipv4.getHeader
 
-          val dip = ipv4h.getDstAddr.getAddress
-          val sip = ipv4h.getSrcAddr.getAddress
-          val proto = Array.fill(1)(ipv4h.getProtocol.value.toByte)
+          val dip = ipv4h.getDstAddr.toString
+          val sip = ipv4h.getSrcAddr.toString
+          val proto = ipv4h.getProtocol.toString
 
           val udp = ipv4.get(classOf[UdpPacket])
           val udph = udp.getHeader
-          val dport = Bytes.toBytes(udph.getDstPort.value)
-          val sport = Bytes.toBytes(udph.getSrcPort.value)
+          val dport = udph.getDstPort.toString
+          val sport = udph.getSrcPort.toString
 
-          (rowkey, dip, sip, dport, sport, proto, raw_packet, ts_byte)
+          (rowkey, dip, sip, dport, sport, proto, raw_packet, BigInt(Array(0.toByte) ++ ts_byte).toString)
         } toOption
 
         (tcp_tuple5, udp_tuple5) match {

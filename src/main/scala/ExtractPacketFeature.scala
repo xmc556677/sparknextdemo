@@ -17,12 +17,12 @@ object ExtractPacketFeature {
   val admin = conn.getAdmin()
 
   def main(args: Array[String]): Unit = {
-    val sparkSession = SparkSession.builder()
+   val sparkSession = SparkSession.builder()
       .appName("ExtractSessionFeature")
       .getOrCreate()
 
     val input_table = "xmc:sessions_2gb"
-    val save_table = "xmc:pkt_feature_2gb"
+    val save_table = "xmc:pkt_feature_2gb_p"
 
     val input_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Array[Byte], Array[Byte], Array[Byte])](input_table)
       .select("sid", "t", "r" )
@@ -36,8 +36,8 @@ object ExtractPacketFeature {
         val pkt = EthernetPacket.newPacket(rawpkt, 0, rawpkt.length)
         val ipv4 = pkt.get(classOf[IpV4Packet])
         val ipv4h = ipv4.getHeader
-        val ttl = Array(ipv4h.getTtl)
-        val tos = Array(ipv4h.getTos.value)
+        val ttl = ipv4h.getTtl
+        val tos = ipv4h.getTos
 
         if(ipv4h.getProtocol == IpNumber.TCP) {
           val tcp = pkt.get(classOf[TcpPacket])
@@ -45,7 +45,7 @@ object ExtractPacketFeature {
 
           val syn = tcph.getSequenceNumber
           val wnd_size = tcph.getWindow
-          Some(rowkey, sid, ts, wnd_size, syn, ttl, tos)
+          Some(rowkey, sid, BigInt(Array(0.toByte) ++ ts).toString, wnd_size.toString, syn.toString, ttl.toString, tos.toString)
         } else {
           None
         }
