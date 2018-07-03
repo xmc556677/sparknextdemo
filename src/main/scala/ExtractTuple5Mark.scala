@@ -20,8 +20,8 @@ object ExtractSession {
       .appName("ExtractSession")
       .getOrCreate()
 
-    val input_table = "xmc:tuple5_2gb"
-    val save_table = "xmc:sessions_2gb_p"
+    val input_table = args(0)
+    val save_table = args(1)
 
     val input_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Array[Byte], Array[Byte], Array[Byte], Array[Byte], Array[Byte], Array[Byte], Array[Byte])](input_table)
       .select("di", "si", "dp", "sp", "pr", "t", "r" )
@@ -37,18 +37,12 @@ object ExtractSession {
         val first :: second :: Nil = List(destination_b, source_b).sortBy(_.mkString(""))
         val tuple5_b = first ++ second ++ proto_b
 
-        val bucket_b = ensureXByte((BigInt(Array(0.toByte) ++ ts_b) / 60 / 1000000).toByteArray, 8)
-
-        val session_id_b = tuple5_b ++ bucket_b
-        assert(bucket_b.length == 8)
-        assert(rowkey.length != 0 )
-        assert(session_id_b.length != 0)
-        (rowkey, session_id_b, rawpacket, BigInt(Array(0.toByte) ++ ts_b).toString)
+        (rowkey, tuple5_b)
     }
 
     save_rdd
       .toHBaseTable(save_table)
-      .toColumns("sid", "r", "t")
+      .toColumns("m")
       .inColumnFamily("p")
       .save()
 
