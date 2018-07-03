@@ -7,7 +7,9 @@ import org.apache.hadoop.hbase.{HBaseConfiguration, HColumnDescriptor, HTableDes
 import org.apache.hadoop.hbase.client.ConnectionFactory
 import org.apache.hadoop.hbase.regionserver.KeyPrefixRegionSplitPolicy
 import org.apache.hadoop.hbase.util.Bytes
-import org.pcap4j.packet.{EthernetPacket, IpV4Packet, TcpPacket, UdpPacket}
+import org.pcap4j.packet._
+import org.pcap4j.packet.factory.PacketFactories
+import org.pcap4j.packet.namednumber.{DataLinkType, IpNumber}
 
 import scala.util.Try
 
@@ -39,16 +41,16 @@ object ExtractTuple5 {
           val ipv4 = eth.get(classOf[IpV4Packet])
           val ipv4h = ipv4.getHeader
 
-          val dip = ipv4h.getDstAddr.toString
-          val sip = ipv4h.getSrcAddr.toString
-          val proto = ipv4h.getProtocol.toString
+          val dip = ipv4h.getDstAddr.getAddress
+          val sip = ipv4h.getSrcAddr.getAddress
+          val proto = Array.fill(1)(ipv4h.getProtocol.value.toByte)
 
           val tcp = ipv4.get(classOf[TcpPacket])
           val tcph = tcp.getHeader
-          val dport = tcph.getDstPort.toString
-          val sport = tcph.getSrcPort.toString
+          val dport = Bytes.toBytes(tcph.getDstPort.value)
+          val sport = Bytes.toBytes(tcph.getSrcPort.value)
 
-          (rowkey, dip, sip, dport, sport, proto, raw_packet, BigInt(Array(0.toByte) ++ ts_byte).toString)
+          (rowkey, dip, sip, dport, sport, proto, raw_packet, ts_byte)
         } toOption
 
         val udp_tuple5 = Try {
@@ -56,17 +58,33 @@ object ExtractTuple5 {
           val ipv4 = eth.get(classOf[IpV4Packet])
           val ipv4h = ipv4.getHeader
 
-          val dip = ipv4h.getDstAddr.toString
-          val sip = ipv4h.getSrcAddr.toString
-          val proto = ipv4h.getProtocol.toString
+          val dip = ipv4h.getDstAddr.getAddress
+          val sip = ipv4h.getSrcAddr.getAddress
+          val proto = Array.fill(1)(ipv4h.getProtocol.value.toByte)
 
           val udp = ipv4.get(classOf[UdpPacket])
           val udph = udp.getHeader
-          val dport = udph.getDstPort.toString
-          val sport = udph.getSrcPort.toString
+          val dport = Bytes.toBytes(udph.getDstPort.value)
+          val sport = Bytes.toBytes(udph.getSrcPort.value)
 
-          (rowkey, dip, sip, dport, sport, proto, raw_packet, BigInt(Array(0.toByte) ++ ts_byte).toString)
+          (rowkey, dip, sip, dport, sport, proto, raw_packet, ts_byte)
         } toOption
+
+        val icmp_tuple5 = Try {
+          val eth = parsePacket(raw_packet)
+          val ipv4 = eth.get(classOf[IpV4Packet])
+          val ipv4h = ipv4.getHeader
+
+          val dip = ipv4h.getDstAddr.getAddress
+          val sip = ipv4h.getSrcAddr.getAddress
+          val proto = Array.fill(1)(ipv4h.getProtocol.value.toByte)
+
+          if(IpNumber.getInstance(proto(0)) == IpNumber.ICMPV4) {
+            (rowkey, dip, sip, Bytes.toBytes(0.toShort), Bytes.toBytes(0.toShort), proto, raw_packet, ts_byte)
+          } else {
+            throw new Exception()
+          }
+        }
 
         (tcp_tuple5, udp_tuple5) match {
           case (Some(v), _) => Some(v)
@@ -75,12 +93,9 @@ object ExtractTuple5 {
         }
     }
 
-    val tuple5_filter_rdd = tuple5_rdd.filter{
-      v =>
-        v match {
-          case None => false
-          case _ => true
-        }
+    val tuple5_filter_rdd = tuple5_rdd.filter {
+      case None => false
+      case _ => true
     }.map(a => a.get)
 
     tuple5_filter_rdd
@@ -88,6 +103,11 @@ object ExtractTuple5 {
       .toColumns("di", "si", "dp", "sp", "pr", "r", "t")
       .inColumnFamily("p")
       .save()
+  }
+
+  def parsePacket(rawpacket: Array[Byte]): Packet = {
+    PacketFactories.getFactory(classOf[Packet], classOf[DataLinkType])
+      .newInstance(rawpacket, 0, rawpacket.length, DataLinkType.EN10MB)
   }
 
   def createPresplitTable(name: String): Unit = {
