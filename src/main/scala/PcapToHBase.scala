@@ -72,14 +72,14 @@ object PcapToHbase {
       var length = 0
       val arrayBuff = ArrayBuffer.empty[PacketInfo]
       while(length < max_size && (! isend)) {
-        Try{pcapHandle.getNextPacketEx} match {
+        Try{pcapHandle.getNextRawPacketEx} match {
           case Success(p) => {
-            length += p.getRawData.length
+            length += p.length
             arrayBuff.append((
               pcapHandle.getTimestamp.getTime / 1000 toInt,
               pcapHandle.getTimestamp.getNanos / 1000 toInt,
               pcapHandle.getOriginalLength,
-              p.getRawData
+              p
             ))
           }
           case Failure(p) => {
