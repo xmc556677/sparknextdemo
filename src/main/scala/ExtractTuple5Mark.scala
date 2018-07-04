@@ -8,7 +8,7 @@ import org.apache.hadoop.hbase.client.ConnectionFactory
 import org.apache.hadoop.hbase.regionserver.KeyPrefixRegionSplitPolicy
 import org.apache.hadoop.hbase.util.Bytes
 
-object ExtractSession {
+object ExtractTuple5Mark {
 
   val conf = HBaseConfiguration.create()
   conf.set("hbase.master", "hmaster.hbase:60000")
@@ -34,7 +34,7 @@ object ExtractSession {
       case(rowkey, dip_b, sip_b, dport_b, sport_b, proto_b, ts_b, rawpacket) =>
         val destination_b = dip_b ++ dport_b
         val source_b = sip_b ++ sport_b
-        val first :: second :: Nil = List(destination_b, source_b).sortBy(_.mkString(""))
+        val first :: second :: Nil = List(destination_b, source_b).sortBy(x => BigInt(x))
         val tuple5_b = first ++ second ++ proto_b
 
         (rowkey, tuple5_b)

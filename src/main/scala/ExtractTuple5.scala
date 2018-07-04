@@ -25,8 +25,8 @@ object ExtractTuple5 {
       .appName("ExtractTuple5")
       .getOrCreate()
 
-    val input_table = "xmc:rawpackets_2gb"
-    val save_table = "xmc:tuple5_2gb_p"
+    val input_table = args(0)
+    val save_table = args(1)
     val input_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Array[Byte], Array[Byte])](input_table)
       .select("r", "t" )
       .inColumnFamily("p")
@@ -37,7 +37,7 @@ object ExtractTuple5 {
     val tuple5_rdd = input_rdd.map{
       case (rowkey, raw_packet, ts_byte) =>
         val tcp_tuple5 = Try {
-          val eth = EthernetPacket.newPacket(raw_packet, 0, raw_packet.length)
+          val eth = parsePacket(raw_packet)
           val ipv4 = eth.get(classOf[IpV4Packet])
           val ipv4h = ipv4.getHeader
 
@@ -54,7 +54,7 @@ object ExtractTuple5 {
         } toOption
 
         val udp_tuple5 = Try {
-          val eth = EthernetPacket.newPacket(raw_packet, 0, raw_packet.length)
+          val eth = parsePacket(raw_packet)
           val ipv4 = eth.get(classOf[IpV4Packet])
           val ipv4h = ipv4.getHeader
 
@@ -103,6 +103,8 @@ object ExtractTuple5 {
       .toColumns("di", "si", "dp", "sp", "pr", "r", "t")
       .inColumnFamily("p")
       .save()
+
+    sparkSession.close()
   }
 
   def parsePacket(rawpacket: Array[Byte]): Packet = {

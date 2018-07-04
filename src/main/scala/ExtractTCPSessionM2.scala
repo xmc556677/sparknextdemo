@@ -99,6 +99,15 @@ object ExtractTCPSessionM2 {
                 }
             } sortBy (x => x._3)
 
+            val stop_seq = items filter {
+              case(_, _, _, flags, _, _, _, _, _) =>
+                if ((flags & 0x1) != 0 || (flags & 0x4) != 0 ) {
+                  true
+                } else {
+                  false
+                }
+            } map (x => x._3)
+
             var flags_cache = scala.collection.mutable.HashMap.empty[(Byte, Long, Long, (BigInt, BigInt), (BigInt, BigInt)), BigInt]
 
             val handshakes_ts_seq = tcp_seq.foldLeft[List[BigInt]](Nil){
@@ -130,38 +139,43 @@ object ExtractTCPSessionM2 {
                   case Some(v) => v :: result
                   case _ => result
                 }
-            }.sorted(Ordering[BigInt].reverse)
+            }
 
-            tcp_seq.map{
-              item =>
+            val tcp_mark_seq = (
+              (handshakes_ts_seq map (x => (0, x))) ++ (stop_seq map (x => (1, x))) ) sortBy (_._2)
+
+            val result = tcp_seq.foldLeft((List.empty[(Array[Byte], Option[Array[Byte]])], tcp_mark_seq)){
+              case((result, ts_seq), item) =>
                 val rowkey = item._9
                 val ts = item._3
                 val mark_b = item._2
 
-                Try {
-                  val ts_mark = handshakes_ts_seq.filter(_ <= ts)(0)
-                  val ts_mark_b = ensureXByte(ts_mark.toByteArray, 8)
-                  (rowkey, mark_b ++ ts_mark_b, ts_mark)
-                } toOption
+                ts_seq match {
+                  case (0, first) :: (1, second) :: _ if (ts >= first && ts <= second) =>
+                    ((rowkey, Some(mark_b ++ ensureXByte(first.toByteArray, 8))) :: result, ts_seq)
+                  case (0, first) :: (1, second) :: (0, third) :: _  if (ts >= third) =>
+                    ((rowkey, Some(mark_b ++ ensureXByte(third.toByteArray, 8))) :: result, ts_seq.drop(2))
+                  case (0, first) :: (0, second) :: _ if (ts >= first && ts <= second) =>
+                    ((rowkey, Some(mark_b ++ ensureXByte(first.toByteArray, 8))) :: result, ts_seq)
+                  case (0, first) :: (0, second) :: _ =>
+                    ((rowkey, Some(mark_b ++ ensureXByte(second.toByteArray, 8))) :: result, ts_seq.drop(1))
+                  case (0, first) :: Nil if(ts >= first) =>
+                    ((rowkey, Some(mark_b ++ ensureXByte(first.toByteArray, 8))) :: result, ts_seq)
+                  case (_, first) :: _ if (ts <= first) =>
+                    ((rowkey, None) :: result, ts_seq)
+                  case _ =>
+                    ((rowkey, None) :: result, ts_seq.drop(1))
+                }
             }
+
+            result._1.filter(_._2 != None).map(x => (x._1, x._2.get))
         }
 
-    val saved_rdd = sessions_list_rdd.flatMap(x => x).filter {
-      _ match {
-        case None => false
-        case _ => true
-      }
-    }.map{
-      case Some(x) =>
-        (x._1, x._2)
-    }
+    val saved_rdd = sessions_list_rdd.flatMap(x => x)
 
     val sessns_per_tuple5_rdd = sessions_list_rdd.map{
       list =>
-        list.filter {
-          case None => false
-          case _ => true
-        }.map(_.get).groupBy(_._3).toList.length
+        list.groupBy(x => BigInt(x._2)).toList.length
     }
     println("average sessions per tuple5: ")
     println(sessns_per_tuple5_rdd.sum() / sessns_per_tuple5_rdd.count().toFloat)

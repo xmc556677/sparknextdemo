@@ -49,9 +49,10 @@ object PcapToHbase {
         case(ts_sec, ts_usec, orig_len, raw_packet) => {
           val ts_ms = BigInt(ts_sec) * 1000000 + BigInt(ts_usec)
           val ts_ms_bs = Bytes.toBytes(ts_ms.toLong)
+          val rand = Array.fill(8)((scala.util.Random.nextInt(256) - 128).toByte)
 
           val rowkey = MessageDigest.getInstance("MD5").digest(ts_ms_bs)
-          (rowkey, raw_packet, ts_ms_bs)
+          (rowkey ++ rand, raw_packet, ts_ms_bs)
         }
       }
       hbaserdd.toHBaseTable(save_table)

@@ -78,6 +78,9 @@ object ExtractUDPSession {
 
     val saved_rdd = sessions_list_rdd flatMap {x => x._1}
 
+    println("UDP tuple5 count: ")
+    println(sessions_list_rdd.count())
+
     println("UDP sessions count: ")
     println(saved_rdd.groupBy(x => BigInt(x._2)).count())
 
