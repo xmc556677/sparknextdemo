@@ -5,9 +5,13 @@ import org.apache.hadoop.hbase.{HBaseConfiguration, HColumnDescriptor, HTableDes
 import org.apache.hadoop.hbase.client.ConnectionFactory
 import it.nerdammer.spark.hbase._
 import org.apache.hadoop.hbase.regionserver.KeyPrefixRegionSplitPolicy
+import org.apache.hadoop.hbase.util.Bytes
 import org.apache.spark.sql.SparkSession
-import org.pcap4j.packet.namednumber.IpNumber
-import org.pcap4j.packet.{EthernetPacket, IpV4Packet, TcpPacket}
+import org.pcap4j.packet.factory.PacketFactories
+import org.pcap4j.packet.namednumber.{DataLinkType, IpNumber}
+import org.pcap4j.packet.{EthernetPacket, IpV4Packet, Packet, TcpPacket}
+
+import scala.util.{Failure, Success, Try}
 
 object ExtractPacketFeature {
 
@@ -21,46 +25,59 @@ object ExtractPacketFeature {
       .appName("ExtractSessionFeature")
       .getOrCreate()
 
-    val input_table = "xmc:sessions_2gb"
-    val save_table = "xmc:pkt_feature_2gb_p"
+    val input_table = args(0)
+    println(s"input table: ${input_table}")
+    val save_table = args(1)
+    println(s"output table: ${save_table}")
 
-    val input_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Array[Byte], Array[Byte], Array[Byte])](input_table)
-      .select("sid", "t", "r" )
+    val input_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Array[Byte], Array[Byte])](input_table)
+      .select("t", "r" )
       .inColumnFamily("p")
 
     if (! admin.tableExists(TableName.valueOf(save_table)))
       createPresplitTable(save_table)
 
     val save_rdd = input_rdd.map{
-      case(rowkey, sid, ts, rawpkt) =>
-        val pkt = EthernetPacket.newPacket(rawpkt, 0, rawpkt.length)
-        val ipv4 = pkt.get(classOf[IpV4Packet])
-        val ipv4h = ipv4.getHeader
-        val ttl = ipv4h.getTtl
-        val tos = ipv4h.getTos
+      case(rowkey, ts, rawpkt) =>
+        val pkt = parsePacket(rawpkt)
 
-        if(ipv4h.getProtocol == IpNumber.TCP) {
-          val tcp = pkt.get(classOf[TcpPacket])
+        Try {
+          val ipv4 = pkt.get(classOf[IpV4Packet])
+          val ipv4h = ipv4.getHeader
+          val tcp = ipv4.get(classOf[TcpPacket])
           val tcph = tcp.getHeader
 
-          val syn = tcph.getSequenceNumber
-          val wnd_size = tcph.getWindow
-          Some(rowkey, sid, BigInt(Array(0.toByte) ++ ts).toString, wnd_size.toString, syn.toString, ttl.toString, tos.toString)
-        } else {
-          None
-        }
+          val dport_b = Bytes.toBytes(tcph.getDstPort.value)
+          val sport_b = Bytes.toBytes(tcph.getSrcPort.value)
+          val proto = Array.fill(1)(ipv4h.getProtocol.value.toByte)
+
+          val flags_b = tcp.getRawData.slice(13, 14)
+
+          val pkt_len_b = Bytes.toBytes(rawpkt.length)
+          val payload_len = Try{
+            tcp.getPayload.getRawData.length
+          } getOrElse(0)
+          val payload_len_b = Bytes.toBytes(payload_len)
+
+          (rowkey, dport_b, sport_b, proto,flags_b, pkt_len_b, payload_len_b, ts)
+        } toOption
     }.filter{
-      _ match {
-        case None => false
-        case _ => true
-      }
-    }.map(_.get)
+      case None => false
+      case _ => true
+    }.map{_.get}
+
+    println(s"saved packets: ${save_rdd.count()}")
 
     save_rdd
       .toHBaseTable(save_table)
-      .toColumns("sid", "t", "tcp_wnd_size", "tcp_syn", "ipv4_ttl", "ipv4_tos")
+      .toColumns("dport", "sport", "proto", "tcp_flags", "pkt_len", "pld_len", "t")
       .inColumnFamily("p")
       .save()
+  }
+
+  def parsePacket(rawpacket: Array[Byte]): Packet = {
+    PacketFactories.getFactory(classOf[Packet], classOf[DataLinkType])
+      .newInstance(rawpacket, 0, rawpacket.length, DataLinkType.EN10MB)
   }
 
   def createPresplitTable(name: String): Unit = {
