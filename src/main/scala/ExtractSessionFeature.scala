@@ -238,10 +238,10 @@ object ExtractSessionFeature {
 
     val ts_seq = datas.map(_._1)
     val ts_IAT = (ts_seq zip ts_seq.drop(1)) map {case(x, y) => y - x}
-    val avg_ts_IAT = ts_IAT.sum / ts_IAT.length
-    val min_ts_IAT = ts_IAT.min
-    val max_ts_IAT = ts_IAT.max
-    val var_ts_IAT = ts_IAT.map(x => (x - avg_ts_IAT) ^ 2).sum / ts_IAT.length
+    val avg_ts_IAT = Try{ts_IAT.sum / ts_IAT.length}.getOrElse(BigInt(0))
+    val min_ts_IAT = Try{ts_IAT.min}.getOrElse(BigInt(0))
+    val max_ts_IAT = Try{ts_IAT.max}.getOrElse(BigInt(0))
+    val var_ts_IAT = Try{ts_IAT.map(x => (x - avg_ts_IAT) ^ 2).sum / ts_IAT.length}.getOrElse(BigInt(0))
 
     val pld_len = datas.map(_._4).filter(_ != None).map(_.get)
     val avg_pld_len = Try{pld_len.sum / pld_len.length}.getOrElse(0)
@@ -286,6 +286,7 @@ object ExtractSessionFeature {
           Some(tcp.getPayload)
         }
       }
+      case _ => None
     }
   }
 
