@@ -46,9 +46,9 @@ object ExtractSessionFeature {
     val sid_rdd = input_rdd.map{
       case(_, sid, ts, rawpacket) =>
         val sid_md5_b = MessageDigest.getInstance("MD5").digest(sid)
-        val sid_md5_s = sid_md5_b.mkString("")
+        val sid_md5_n = BigInt(sid_md5_b)
 
-        (sid_md5_s, sid_md5_b, ts, rawpacket)
+        (sid_md5_n, sid_md5_b, ts, rawpacket)
     }
 
     val sid_group_rdd = sid_rdd.groupBy(_._1).cache()
@@ -92,12 +92,17 @@ object ExtractSessionFeature {
             case _ => false
           }
 
-        val Some(((_, sport), (_, dport))) :: Nil = pkts.take(1).map(get_direction)
+        val Some(((sip, sport), (dip, dport), proto)) :: Nil = pkts.take(1).map(get_direction)
+
+        val direction = sip ++ sport ++ dip ++ dport ++ Array(proto.toByte)
+
+        val mark = dip ++ dport ++ Array(proto.toByte)
 
         (rowkey, avg_pkt_len, min_pkt_len, max_pkt_len, var_pkt_len,
           avg_ts_IAT, min_ts_IAT, max_ts_IAT, var_ts_IAT,
           avg_pld_len, min_pld_len, max_pld_len, var_pld_len,
-          ttl_bytes, sessn_dur, pkg_cnt, psh_cnt, sport, dport)
+          ttl_bytes, sessn_dur, pkg_cnt, psh_cnt, sport, dport,
+          direction, mark)
     }
 
     implicit def bigintWriter: FieldWriter[BigInt] = new SingleColumnFieldWriter[BigInt] {
@@ -109,7 +114,8 @@ object ExtractSessionFeature {
       .toColumns("avg_pkt_len", "min_pkt_len", "max_pkt_len", "var_pkt_len",
         "avg_ts_IAT", "min_ts_IAT", "max_ts_IAT", "var_ts_IAT",
         "avg_pld_len", "min_pld_len", "max_pld_len", "var_pld_len",
-        "total_bytes", "sessn_dur", "pkts_cnt", "psh_cnt", "sport", "dport")
+        "total_bytes", "sessn_dur", "pkts_cnt", "psh_cnt", "sport", "dport",
+        "direction", "m")
       .inColumnFamily("sessn")
       .save()
 
@@ -128,7 +134,7 @@ object ExtractSessionFeature {
         val statistic_datas = datas
           .map{x =>
             val direction = get_direction(x._2).map{
-              case ((sip, sport), (dip, dport)) =>
+              case ((sip, sport), (dip, dport), _) =>
                 (BigInt(Array(0.toByte) ++ sip ++ sport),
                   BigInt(Array(0.toByte) ++ dip ++ dport))
             }
@@ -150,13 +156,13 @@ object ExtractSessionFeature {
         val (sc_avg_pkt_len, sc_min_pkt_len, sc_max_pkt_len, sc_var_pkt_len,
           sc_avg_ts_IAT, sc_min_ts_IAT, sc_max_ts_IAT, sc_var_ts_IAT,
           sc_avg_pld_len, sc_min_pld_len, sc_max_pld_len, sc_var_pld_len,
-          sc_ttl_bytes) = stream_statitic_pattern(sc_datas)
+          sc_ttl_bytes, sc_pkt_cnt) = stream_statitic_pattern(sc_datas)
 
 
         (rowkey, sc_avg_pkt_len, sc_min_pkt_len, sc_max_pkt_len, sc_var_pkt_len,
           sc_avg_ts_IAT, sc_min_ts_IAT, sc_max_ts_IAT, sc_var_ts_IAT,
           sc_avg_pld_len, sc_min_pld_len, sc_max_pld_len, sc_var_pld_len,
-          sc_ttl_bytes)
+          sc_ttl_bytes, sc_pkt_cnt)
     }
 
     save_rdd2
@@ -164,7 +170,7 @@ object ExtractSessionFeature {
       .toColumns("sc_avg_pkt_len", "sc_min_pkt_len", "sc_max_pkt_len", "sc_var_pkt_len",
         "sc_avg_ts_IAT", "sc_min_ts_IAT", "sc_max_ts_IAT", "sc_var_ts_IAT",
         "sc_avg_pld_len", "sc_min_pld_len", "sc_max_pld_len", "sc_var_pld_len",
-        "sc_total_bytes")
+        "sc_total_bytes", "sc_pkt_cnt")
       .inColumnFamily("sessn")
       .save()
 
@@ -183,7 +189,7 @@ object ExtractSessionFeature {
         val statistic_datas = datas
           .map{x =>
             val direction = get_direction(x._2).map{
-              case ((sip, sport), (dip, dport)) =>
+              case ((sip, sport), (dip, dport), _) =>
                 (BigInt(Array(0.toByte) ++ sip ++ sport),
                   BigInt(Array(0.toByte) ++ dip ++ dport))
             }
@@ -205,12 +211,12 @@ object ExtractSessionFeature {
         val (cs_avg_pkt_len, cs_min_pkt_len, cs_max_pkt_len, cs_var_pkt_len,
         cs_avg_ts_IAT, cs_min_ts_IAT, cs_max_ts_IAT, cs_var_ts_IAT,
         cs_avg_pld_len, cs_min_pld_len, cs_max_pld_len, cs_var_pld_len,
-        cs_ttl_bytes) = stream_statitic_pattern(cs_datas)
+        cs_ttl_bytes, cs_pkt_cnt) = stream_statitic_pattern(cs_datas)
 
         (rowkey, cs_avg_pkt_len, cs_min_pkt_len, cs_max_pkt_len, cs_var_pkt_len,
           cs_avg_ts_IAT, cs_min_ts_IAT, cs_max_ts_IAT, cs_var_ts_IAT,
           cs_avg_pld_len, cs_min_pld_len, cs_max_pld_len, cs_var_pld_len,
-          cs_ttl_bytes)
+          cs_ttl_bytes, cs_pkt_cnt)
     }
 
     save_rdd3
@@ -218,7 +224,7 @@ object ExtractSessionFeature {
       .toColumns("cs_avg_pkt_len", "cs_min_pkt_len", "cs_max_pkt_len", "cs_var_pkt_len",
         "cs_avg_ts_IAT", "cs_min_ts_IAT", "cs_max_ts_IAT", "cs_var_ts_IAT",
         "cs_avg_pld_len", "cs_min_pld_len", "cs_max_pld_len", "cs_var_pld_len",
-        "cs_total_bytes")
+        "cs_total_bytes", "cs_pkt_cnt")
       .inColumnFamily("sessn")
       .save()
 
@@ -249,21 +255,24 @@ object ExtractSessionFeature {
     val max_pld_len = Try{pld_len.max}.getOrElse(0)
     val var_pld_len = Try{pld_len.map(x => (x - avg_pld_len) ^ 2).sum / pld_len.length}.getOrElse(0)
 
-    val ttl_bytes = pld_len.sum
+    val ttl_bytes = pkt_len.sum
+    val pkt_cnt = pkt_len.length
+
     (avg_pkt_len, min_pkt_len, max_pkt_len, var_pkt_len,
     avg_ts_IAT, min_ts_IAT, max_ts_IAT, var_ts_IAT,
     avg_pld_len, min_pld_len, max_pld_len, var_pld_len,
-    ttl_bytes)
+    ttl_bytes, pkt_cnt)
   }
 
-  def get_direction(pkt: Packet): Option[((Array[Byte], Array[Byte]), (Array[Byte], Array[Byte]))] = {
+  def get_direction(pkt: Packet): Option[((Array[Byte], Array[Byte]), (Array[Byte], Array[Byte]), Byte)] = {
     (pkt.contains(classOf[TcpPacket]), pkt.contains(classOf[IpV4Packet])) match {
       case (true, true) => {
         val ipv4h = pkt.get(classOf[IpV4Packet]).getHeader
         val tcph = pkt.get(classOf[TcpPacket]).getHeader
         val dest = (ipv4h.getDstAddr.getAddress, Bytes.toBytes(tcph.getDstPort.value))
         val src = (ipv4h.getSrcAddr.getAddress, Bytes.toBytes(tcph.getSrcPort.value))
-        Some(src, dest)
+        val proto = ipv4h.getProtocol.value
+        Some(src, dest, proto)
       }
       case _ =>  None
     }

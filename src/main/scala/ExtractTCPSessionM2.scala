@@ -87,7 +87,7 @@ object ExtractTCPSessionM2 {
     val sessions_list_rdd = tcp_format_rdd.groupBy(_._1)
         .map{
           case(_, it) =>
-            val items = it.toList
+            val items = it.toList sortBy (x => x._3)
             val tcp_seq = items filter {
               case(_, _, _, flags, _, _, _, _, _, rawpacket, ts_b) =>
                 if(flags == 0x02 ||
@@ -97,7 +97,7 @@ object ExtractTCPSessionM2 {
                 } else {
                   false
                 }
-            } sortBy (x => x._3)
+            }
 
             val stop_seq = items filter {
               case(_, _, _, flags, _, _, _, _, _, _, _) =>
@@ -144,7 +144,7 @@ object ExtractTCPSessionM2 {
             val tcp_mark_seq = (
               (handshakes_ts_seq map (x => (0, x))) ++ (stop_seq map (x => (1, x))) ) sortBy (_._2)
 
-            val result = tcp_seq.foldLeft((List.empty[(Array[Byte], Option[Array[Byte]], Array[Byte], Array[Byte])], tcp_mark_seq)){
+            val result = items.foldLeft((List.empty[(Array[Byte], Option[Array[Byte]], Array[Byte], Array[Byte])], tcp_mark_seq)){
               case((result, ts_seq), item) =>
                 val rowkey = item._9
                 val ts = item._3
@@ -179,6 +179,20 @@ object ExtractTCPSessionM2 {
       list =>
         list.groupBy(x => BigInt(x._2)).toList.length
     }
+    println("each tuple5's packet number")
+    input_rdd.groupBy(x => BigInt(x._9)).map(_._2.toList.length).collect
+        .foreach(x => print(x + " "))
+    println()
+    println("each session's packet:")
+    sessions_list_rdd.flatMap{
+      list =>
+        list.groupBy(x => BigInt(x._2)).toList.map(_._2.map(x => BigInt(x._3)))
+    }.collect.foreach{
+      x =>
+        println(x.length)
+        println(x.sorted)
+    }
+    println()
     println("average sessions per tuple5: ")
     println(sessns_per_tuple5_rdd.sum() / sessns_per_tuple5_rdd.count().toFloat)
     println("max sessions per tuple5: ")
