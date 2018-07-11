@@ -1,5 +1,7 @@
 package cc.xmccc.sparkdemo
 
+import java.net.InetAddress
+
 import cc.xmccc.hbase.util.HBaseUtil
 import it.nerdammer.spark.hbase._
 import org.apache.hadoop.hbase.client.ConnectionFactory
@@ -139,7 +141,7 @@ object ExtractTCPSessionM2 {
                   case Some(v) => v :: result
                   case _ => result
                 }
-            }
+            } distinct
 
             val tcp_mark_seq = (
               (handshakes_ts_seq map (x => (0, x))) ++ (stop_seq map (x => (1, x))) ) sortBy (_._2)
@@ -153,20 +155,27 @@ object ExtractTCPSessionM2 {
                 val rawpacket = item._10
 
                 ts_seq match {
-                  case (0, first) :: (1, second) :: _ if (ts >= first && ts <= second) =>
+                  case Nil =>
+                    ((rowkey, None, ts_b, rawpacket) :: result, ts_seq)
+                  case (_, first) :: _ if (ts < first) =>
+                    ((rowkey, None, ts_b, rawpacket) :: result, ts_seq)
+                  case (1, _) :: (0, first) :: _ if first == ts =>
+                    ((rowkey, Some(mark_b ++ ensureXByte(first.toByteArray, 8)), ts_b, rawpacket) :: result, ts_seq.drop(1))
+                  case (1, _) :: _ =>
+                    ((rowkey, None, ts_b, rawpacket) :: result, ts_seq.drop(1))
+                  case (0, first) :: Nil if ts >= first =>
                     ((rowkey, Some(mark_b ++ ensureXByte(first.toByteArray, 8)), ts_b, rawpacket) :: result, ts_seq)
-                  case (0, first) :: (1, second) :: (0, third) :: _  if (ts >= third) =>
-                    ((rowkey, Some(mark_b ++ ensureXByte(third.toByteArray, 8)), ts_b, rawpacket) :: result, ts_seq.drop(2))
-                  case (0, first) :: (0, second) :: _ if (ts >= first && ts <= second) =>
+
+
+                  case (0, first) :: (1, second) :: _ if (ts >= first && ts < second) =>
+                    ((rowkey, Some(mark_b ++ ensureXByte(first.toByteArray, 8)), ts_b, rawpacket) :: result, ts_seq)
+                  case (0, first) :: (1, second) :: _  =>
+                    ((rowkey, None, ts_b, rawpacket) :: result, ts_seq.drop(1))
+
+                  case (0, first) :: (0, second) :: _ if (ts >= first && ts < second) =>
                     ((rowkey, Some(mark_b ++ ensureXByte(first.toByteArray, 8)), ts_b, rawpacket) :: result, ts_seq)
                   case (0, first) :: (0, second) :: _ =>
                     ((rowkey, Some(mark_b ++ ensureXByte(second.toByteArray, 8)), ts_b, rawpacket) :: result, ts_seq.drop(1))
-                  case (0, first) :: Nil if(ts >= first) =>
-                    ((rowkey, Some(mark_b ++ ensureXByte(first.toByteArray, 8)), ts_b, rawpacket) :: result, ts_seq)
-                  case (_, first) :: _ if (ts <= first) =>
-                    ((rowkey, None, ts_b, rawpacket) :: result, ts_seq)
-                  case _ =>
-                    ((rowkey, None, ts_b, rawpacket) :: result, ts_seq.drop(1))
                 }
             }
 
@@ -179,19 +188,34 @@ object ExtractTCPSessionM2 {
       list =>
         list.groupBy(x => BigInt(x._2)).toList.length
     }
-    println("each tuple5's packet number")
+/*    println("each tuple5's packet number")
     input_rdd.groupBy(x => BigInt(x._9)).map(_._2.toList.length).collect
         .foreach(x => print(x + " "))
-    println()
-    println("each session's packet:")
-    sessions_list_rdd.flatMap{
+    println()*/
+    val packets_per_session =  sessions_list_rdd.flatMap{
       list =>
-        list.groupBy(x => BigInt(x._2)).toList.map(_._2.map(x => BigInt(x._3)))
-    }.collect.foreach{
-      x =>
-        println(x.length)
-        println(x.sorted)
-    }
+        val o = for {
+          item <- list.lift(0)
+          sid = item._2
+          dip = InetAddress.getByAddress(sid.slice(0, 4))
+          dport = BigInt(sid.slice(4, 6))
+          sip = InetAddress.getByAddress(sid.slice(6, 10))
+          sport = BigInt(sid.slice(10, 12))
+          proto = sid.slice(12, 13)
+          ts = BigInt(sid.slice(13, 21))
+        } yield s"${sip}:${sport}-${dip}:${dport}_${ts}"
+
+        list.groupBy(x => BigInt(x._2)).toList.map(xx => (o, xx._2.map(x => BigInt(x._3))))
+    }.collect
+
+    println("max packets per session: ")
+    val pkt_num_per_sessions = packets_per_session.map(_._2.length)
+    println(pkt_num_per_sessions.max)
+    println(packets_per_session.maxBy(_._2.length))
+    println("min packets per session: ")
+    println(pkt_num_per_sessions.min)
+    println(packets_per_session.minBy(_._2.length))
+
     println()
     println("average sessions per tuple5: ")
     println(sessns_per_tuple5_rdd.sum() / sessns_per_tuple5_rdd.count().toFloat)
