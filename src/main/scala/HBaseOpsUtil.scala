@@ -1,14 +1,15 @@
 package cc.xmccc.sparkdemo.schema
 
-import it.nerdammer.spark.hbase.conversion.{FieldReader, FieldWriter}
+import it.nerdammer.spark.hbase.conversion.{FieldReader, FieldWriter, SingleColumnFieldWriter}
+import org.apache.hadoop.hbase.util.Bytes
 import shapeless.{::, Generic, HList, HNil, Lazy}
 
 case class SessionFeatureTable(
-                              avg_pkt_len: Int, min_pkt_len: Int, max_pkt_len: Int, var_pkt_len: Double,
+                              rowkey: Array[Byte], avg_pkt_len: Int, min_pkt_len: Int, max_pkt_len: Int, var_pkt_len: Double,
                               avg_ts_IAT: BigInt, min_ts_IAT: BigInt, max_ts_IAT: BigInt, var_ts_IAT: Double,
                               avg_pld_len: Int, min_pld_len: Int, max_pld_len: Int, var_pld_len: Double,
-                              total_bytes: Long, sessn_dur: BigInt, pkts_cnt: Long, psh_cnt: Long, sport: Short,
-                              dport: Short, direction: Array[Byte], m: Array[Byte],
+                              total_bytes: Long, sessn_dur: BigInt, pkts_cnt: Long, psh_cnt: Long, sport: Array[Byte],
+                              dport: Array[Byte], direction: Array[Byte], m: Array[Byte],
 
                               sc_avg_pkt_len: Int, sc_min_pkt_len: Int, sc_max_pkt_len: Int, sc_var_pkt_len: Double,
                               sc_avg_ts_IAT: BigInt, sc_min_ts_IAT: BigInt, sc_max_ts_IAT: BigInt, sc_var_ts_IAT: Double,
@@ -81,6 +82,10 @@ object HBaseOpsUtil {
       def map(data: A): HBaseData =
         writer.value.map(gen.to(data))
     }
+
+  implicit def bigintWriter: FieldWriter[BigInt] = new SingleColumnFieldWriter[BigInt] {
+    override def mapColumn(data: BigInt): Option[Array[Byte]] = Some(Bytes.toBytes(data.toLong))
+  }
 }
 
 import HBaseOpsUtil._
