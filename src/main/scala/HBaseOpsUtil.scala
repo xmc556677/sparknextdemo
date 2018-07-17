@@ -1,8 +1,8 @@
 package cc.xmccc.sparkdemo.schema
 
-import it.nerdammer.spark.hbase.conversion.{FieldReader, FieldWriter, SingleColumnFieldWriter}
+import it.nerdammer.spark.hbase.conversion._
 import org.apache.hadoop.hbase.util.Bytes
-import shapeless.{::, Generic, HList, HNil, Lazy}
+import shapeless.{::, Generic, HList, HNil, Lazy, Poly, Poly1}
 
 case class SessionFeatureTable(
                               rowkey: Array[Byte], avg_pkt_len: Int, min_pkt_len: Int, max_pkt_len: Int, var_pkt_len: Double,
@@ -22,6 +22,25 @@ case class SessionFeatureTable(
                               cs_total_bytes: Long, cs_pkt_cnt: Long
                               )
 
+case class FuzzySetAvgFeatureTable(
+                                    rowkey: Array[Byte],
+                                    avg_pkt_len: Double, min_pkt_len: Double, max_pkt_len: Double, var_pkt_len: Double,
+                                    avg_ts_IAT: Double, min_ts_IAT: Double, max_ts_IAT: Double, var_ts_IAT: Double,
+                                    avg_pld_len: Double, min_pld_len: Double, max_pld_len: Double, var_pld_len: Double,
+                                    total_bytes: Double, sessn_dur: Double, pkts_cnt: Double, psh_cnt: Double,
+
+                                    sc_avg_pkt_len: Double, sc_min_pkt_len: Double, sc_max_pkt_len: Double, sc_var_pkt_len: Double,
+                                    sc_avg_ts_IAT: Double, sc_min_ts_IAT: Double, sc_max_ts_IAT: Double, sc_var_ts_IAT: Double,
+                                    sc_avg_pld_len: Double, sc_min_pld_len: Double, sc_max_pld_len: Double, sc_var_pld_len: Double,
+                                    sc_total_bytes: Double, sc_pkt_cnt: Double,
+
+                                    cs_avg_pkt_len: Double, cs_min_pkt_len: Double, cs_max_pkt_len: Double, cs_var_pkt_len: Double,
+                                    cs_avg_ts_IAT: Double, cs_min_ts_IAT: Double, cs_max_ts_IAT: Double, cs_var_ts_IAT: Double,
+                                    cs_avg_pld_len: Double, cs_min_pld_len: Double, cs_max_pld_len: Double, cs_var_pld_len: Double,
+                                    cs_total_bytes: Double, cs_pkt_cnt: Double
+
+                                  )
+
 object HBaseOpsUtil {
 
   implicit def hnilReader: FieldReader[HNil] =
@@ -37,7 +56,7 @@ object HBaseOpsUtil {
     new FieldReader[H :: T] {
       def map(data: HBaseData): H :: T = {
         val head = data.take(1)
-        val tail = data.tail
+        val tail = data.drop(1)
         hReader.value.map(head) :: tReader.map(tail)
       }
     }
@@ -52,6 +71,10 @@ object HBaseOpsUtil {
         gen.from(reader.value.map(data))
       }
     }
+
+  implicit def bigintReader: FieldReader[BigInt] = new SingleColumnConcreteFieldReader[BigInt] {
+    override def columnMap(cols: Array[Byte]): BigInt = BigInt(Array(0.toByte) ++ cols)
+  }
 
   implicit def hnilWriter: FieldWriter[HNil] =
     new FieldWriter[HNil] {

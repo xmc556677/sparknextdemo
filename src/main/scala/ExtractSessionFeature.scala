@@ -77,17 +77,17 @@ object ExtractSessionFeature {
         val avg_pkt_len = raw_pkt_lens.sum / raw_pkt_lens.length
         val min_pkt_len = raw_pkt_lens.min
         val max_pkt_len = raw_pkt_lens.max
-        val var_pkt_len = raw_pkt_lens.map(x => (x - avg_pkt_len) ^ 2).sum / avg_pkt_len.toDouble
+        val var_pkt_len = raw_pkt_lens.map(x => math.pow(x - avg_pkt_len, 2)).sum / avg_pkt_len.toDouble
 
         val avg_ts_IAT = ts_IAT.sum / ts_IAT.length
         val min_ts_IAT = ts_IAT.min
         val max_ts_IAT = ts_IAT.max
-        val var_ts_IAT = (BigDecimal(ts_IAT.map(x => (x - avg_ts_IAT) ^ 2).sum) / ts_IAT.length).toDouble
+        val var_ts_IAT = (BigDecimal(ts_IAT.map(x => math.pow((x - avg_ts_IAT).toDouble, 2)).sum) / ts_IAT.length).toDouble
 
         val avg_pld_len = payload_lens.sum / payload_lens.length
         val min_pld_len = payload_lens.min
         val max_pld_len = payload_lens.max
-        val var_pld_len = (BigDecimal(payload_lens.map(x => (x - avg_pld_len) ^ 2).sum) / payload_lens.length).toDouble
+        val var_pld_len = (BigDecimal(payload_lens.map(x => math.pow(x - avg_pld_len, 2)).sum) / payload_lens.length).toDouble
 
         val ttl_bytes = raw_pkt_lens.map(_.toLong).sum
 
@@ -199,13 +199,13 @@ object ExtractSessionFeature {
     val avg_ts_IAT = Try{ts_IAT.sum / ts_IAT.length}.getOrElse(BigInt(0))
     val min_ts_IAT = Try{ts_IAT.min}.getOrElse(BigInt(0))
     val max_ts_IAT = Try{ts_IAT.max}.getOrElse(BigInt(0))
-    val var_ts_IAT = Try{BigDecimal(ts_IAT.map(x => (x - avg_ts_IAT) ^ 2).sum) / ts_IAT.length}.getOrElse(BigDecimal(0)).toDouble
+    val var_ts_IAT = Try{BigDecimal(ts_IAT.map(x => math.pow((x - avg_ts_IAT).toDouble, 2)).sum) / ts_IAT.length}.getOrElse(BigDecimal(0)).toDouble
 
     val pld_len = datas.map(_._4).filter(_ != None).map(_.get)
     val avg_pld_len = Try{pld_len.sum / pld_len.length}.getOrElse(0)
     val min_pld_len = Try{pld_len.min}.getOrElse(0)
     val max_pld_len = Try{pld_len.max}.getOrElse(0)
-    val var_pld_len = Try{BigDecimal(pld_len.map(x => (x - avg_pld_len) ^ 2).sum) / pld_len.length}.getOrElse(BigDecimal(0)).toDouble
+    val var_pld_len = Try{BigDecimal(pld_len.map(x => math.pow(x - avg_pld_len, 2)).sum) / pld_len.length}.getOrElse(BigDecimal(0)).toDouble
 
     val ttl_bytes = pkt_len.sum
     val pkt_cnt = pkt_len.length
