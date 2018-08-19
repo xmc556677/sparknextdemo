@@ -24,8 +24,8 @@ object ExtractFuzzySetFeature {
       at{case(a, b) => a :: b}
   }
 
-  object stdVarCalcuPoly1 extends Poly1 {
-    implicit def listCase[A](implicit num: Numeric[A]): Case.Aux[List[A], Double] =
+  object percentAvgCalcuPoly1 extends Poly1 {
+    implicit def listCase[A](implicit num: Numeric[A]): Case.Aux[List[A], (Double, Double)] =
       at{
         a =>
           val avg = num.toDouble(a.sum) / a.length
@@ -39,11 +39,11 @@ object ExtractFuzzySetFeature {
           }
           val avg_filtered = num.toDouble(a_filtered.sum) / a_filtered.length
 
-          avg_filtered
+          (a_filtered.length.toDouble / a.length.toDouble, avg_filtered)
       }
 
-    implicit val arraybyteCase: Case.Aux[List[Array[Byte]], Double] =
-      at{a => 0}
+    implicit val arraybyteCase: Case.Aux[List[Array[Byte]], (Double, Double)] =
+      at{a => (0, 0)}
   }
 
   object toListPoly1 extends Poly1 {
@@ -86,6 +86,7 @@ object ExtractFuzzySetFeature {
       case (_, it) =>
         val list = it.toList
         val rowkey = MessageDigest.getInstance("MD5").digest(list(0).m)
+        val fm = list(0).m
         val repr_list = list map { x => Generic[SessionFeatureToExtract].to(x)}
         val repr_head :: repr_tail = repr_list
         val repr_list_head = repr_head map toListPoly1
@@ -95,16 +96,16 @@ object ExtractFuzzySetFeature {
             aAb map pairConsPoly1
         }
 
-        val avg_hlist = list_hlist.map(stdVarCalcuPoly1)
+        val avg_hlist = list_hlist.map(percentAvgCalcuPoly1)
 
-        Generic[FuzzySetAvgFeatureTable].from(rowkey :: (avg_hlist.tail.tail))
+        Generic[FuzzySetAvgFeatureTable].from(rowkey :: fm :: (avg_hlist.tail.tail))
     }
 
     saved_rdd.take(10).foreach(println)
 
     saved_rdd
       .toHBaseTable(save_table)
-      .toColumns("avg_pkt_len", "min_pkt_len", "max_pkt_len", "var_pkt_len",
+      .toColumns("m", "avg_pkt_len", "min_pkt_len", "max_pkt_len", "var_pkt_len",
         "avg_ts_IAT", "min_ts_IAT", "max_ts_IAT", "var_ts_IAT",
         "avg_pld_len", "min_pld_len", "max_pld_len", "var_pld_len",
         "total_bytes", "sessn_dur", "pkts_cnt", "psh_cnt",

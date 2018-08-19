@@ -9,7 +9,7 @@ case class SessionFeatureTable(
                               avg_ts_IAT: BigInt, min_ts_IAT: BigInt, max_ts_IAT: BigInt, var_ts_IAT: Double,
                               avg_pld_len: Int, min_pld_len: Int, max_pld_len: Int, var_pld_len: Double,
                               total_bytes: Long, sessn_dur: BigInt, pkts_cnt: Long, psh_cnt: Long, sport: Array[Byte],
-                              dport: Array[Byte], direction: Array[Byte], m: Array[Byte],
+                              dport: Array[Byte], direction: Array[Byte], m: Array[Byte], sid: Array[Byte],
 
                               sc_avg_pkt_len: Int, sc_min_pkt_len: Int, sc_max_pkt_len: Int, sc_var_pkt_len: Double,
                               sc_avg_ts_IAT: BigInt, sc_min_ts_IAT: BigInt, sc_max_ts_IAT: BigInt, sc_var_ts_IAT: Double,
@@ -40,22 +40,21 @@ case class SessionFeatureToExtract(
                               )
 
 case class FuzzySetAvgFeatureTable(
-                                    rowkey: Array[Byte],
-                                    avg_pkt_len: Double, min_pkt_len: Double, max_pkt_len: Double, var_pkt_len: Double,
-                                    avg_ts_IAT: Double, min_ts_IAT: Double, max_ts_IAT: Double, var_ts_IAT: Double,
-                                    avg_pld_len: Double, min_pld_len: Double, max_pld_len: Double, var_pld_len: Double,
-                                    total_bytes: Double, sessn_dur: Double, pkts_cnt: Double, psh_cnt: Double,
+                                    rowkey: Array[Byte], m: Array[Byte],
+                                    avg_pkt_len: (Double, Double), min_pkt_len: (Double, Double), max_pkt_len: (Double, Double), var_pkt_len: (Double, Double),
+                                    avg_ts_IAT: (Double, Double), min_ts_IAT: (Double, Double), max_ts_IAT: (Double, Double), var_ts_IAT: (Double, Double),
+                                    avg_pld_len: (Double, Double), min_pld_len: (Double, Double), max_pld_len: (Double, Double), var_pld_len: (Double, Double),
+                                    total_bytes: (Double, Double), sessn_dur: (Double, Double), pkts_cnt: (Double, Double), psh_cnt: (Double, Double),
 
-                                    sc_avg_pkt_len: Double, sc_min_pkt_len: Double, sc_max_pkt_len: Double, sc_var_pkt_len: Double,
-                                    sc_avg_ts_IAT: Double, sc_min_ts_IAT: Double, sc_max_ts_IAT: Double, sc_var_ts_IAT: Double,
-                                    sc_avg_pld_len: Double, sc_min_pld_len: Double, sc_max_pld_len: Double, sc_var_pld_len: Double,
-                                    sc_total_bytes: Double, sc_pkt_cnt: Double,
+                                    sc_avg_pkt_len: (Double, Double), sc_min_pkt_len: (Double, Double), sc_max_pkt_len: (Double, Double), sc_var_pkt_len: (Double, Double),
+                                    sc_avg_ts_IAT: (Double, Double), sc_min_ts_IAT: (Double, Double), sc_max_ts_IAT: (Double, Double), sc_var_ts_IAT: (Double, Double),
+                                    sc_avg_pld_len: (Double, Double), sc_min_pld_len: (Double, Double), sc_max_pld_len: (Double, Double), sc_var_pld_len: (Double, Double),
+                                    sc_total_bytes: (Double, Double), sc_pkt_cnt: (Double, Double),
 
-                                    cs_avg_pkt_len: Double, cs_min_pkt_len: Double, cs_max_pkt_len: Double, cs_var_pkt_len: Double,
-                                    cs_avg_ts_IAT: Double, cs_min_ts_IAT: Double, cs_max_ts_IAT: Double, cs_var_ts_IAT: Double,
-                                    cs_avg_pld_len: Double, cs_min_pld_len: Double, cs_max_pld_len: Double, cs_var_pld_len: Double,
-                                    cs_total_bytes: Double, cs_pkt_cnt: Double
-
+                                    cs_avg_pkt_len: (Double, Double), cs_min_pkt_len: (Double, Double), cs_max_pkt_len: (Double, Double), cs_var_pkt_len: (Double, Double),
+                                    cs_avg_ts_IAT: (Double, Double), cs_min_ts_IAT: (Double, Double), cs_max_ts_IAT: (Double, Double), cs_var_ts_IAT: (Double, Double),
+                                    cs_avg_pld_len: (Double, Double), cs_min_pld_len: (Double, Double), cs_max_pld_len: (Double, Double), cs_var_pld_len: (Double, Double),
+                                    cs_total_bytes: (Double, Double), cs_pkt_cnt: (Double, Double)
                                   )
 
 object HBaseOpsUtil {
@@ -93,6 +92,11 @@ object HBaseOpsUtil {
     override def columnMap(cols: Array[Byte]): BigInt = BigInt(Array(0.toByte) ++ cols)
   }
 
+  implicit def tuple2doubleReader: FieldReader[(Double, Double)] = new SingleColumnConcreteFieldReader[(Double, Double)] {
+    override def columnMap(cols: Array[Byte]): (Double, Double) =
+      (Bytes.toDouble(cols.slice(0, 8)), Bytes.toDouble(cols.slice(8, 16)))
+  }
+
   implicit def hnilWriter: FieldWriter[HNil] =
     new FieldWriter[HNil] {
       def map(data: HNil): HBaseData = {
@@ -125,6 +129,11 @@ object HBaseOpsUtil {
 
   implicit def bigintWriter: FieldWriter[BigInt] = new SingleColumnFieldWriter[BigInt] {
     override def mapColumn(data: BigInt): Option[Array[Byte]] = Some(Bytes.toBytes(data.toLong))
+  }
+
+  implicit def tuple2doubleWriter: FieldWriter[(Double, Double)] = new SingleColumnFieldWriter[(Double, Double)] {
+    override def mapColumn(data: (Double, Double)): Option[Array[Byte]] =
+      Some(Bytes.toBytes(data._1) ++ Bytes.toBytes(data._2))
   }
 }
 

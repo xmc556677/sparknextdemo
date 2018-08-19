@@ -57,9 +57,12 @@ object ExtractPacketFeature {
           val payload_len = Try{
             tcp.getPayload.getRawData.length
           } getOrElse(0)
+          val payload = Try{
+            tcp.getPayload.getRawData
+          } getOrElse(Array(0.toByte))
           val payload_len_b = Bytes.toBytes(payload_len)
 
-          (rowkey, dport_b, sport_b, proto,flags_b, pkt_len_b, payload_len_b, ts)
+          (rowkey, dport_b, sport_b, proto,flags_b, pkt_len_b, payload_len_b, ts, payload)
         } toOption
     }.filter{
       case None => false
@@ -70,7 +73,7 @@ object ExtractPacketFeature {
 
     save_rdd
       .toHBaseTable(save_table)
-      .toColumns("dport", "sport", "proto", "tcp_flags", "pkt_len", "pld_len", "t")
+      .toColumns("dport", "sport", "proto", "tcp_flags", "pkt_len", "pld_len", "t", "payload")
       .inColumnFamily("p")
       .save()
   }

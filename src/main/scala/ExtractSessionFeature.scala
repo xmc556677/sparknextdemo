@@ -37,14 +37,14 @@ object ExtractSessionFeature {
     val input_table = args(0)
     val save_table = args(1)
 
-    val input_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Array[Byte], Array[Byte], Array[Byte])](input_table)
+    val input_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Option[Array[Byte]], Array[Byte], Array[Byte])](input_table)
       .select("sid", "t", "r" )
       .inColumnFamily("p")
 
     if (! admin.tableExists(TableName.valueOf(save_table)))
       createPresplitTable(save_table)
 
-    val sid_rdd = input_rdd.map{
+    val sid_rdd = input_rdd.filter(_._2 != None).map(x => (x._1, x._2.get, x._3, x._4)).map{
       case(_, sid, ts, rawpacket) =>
         val sid_md5_b = MessageDigest.getInstance("MD5").digest(sid)
         val sid_md5_n = BigInt(sid_md5_b)
@@ -65,6 +65,7 @@ object ExtractSessionFeature {
           }
         val datas = ds.sortBy(x => BigInt(Array(0.toByte) ++ x._3))
         val rowkey = datas(0)._2
+        val sid = datas(0)._2
         val tss = datas.map(x => BigInt(Array(0.toByte) ++ x._3))
         val ts_IAT = (tss zip tss.drop(1)) map {case (x, y) => y - x}
         val raw_pkt_lens = datas.map(_._4.length)
@@ -149,7 +150,7 @@ object ExtractSessionFeature {
           avg_ts_IAT, min_ts_IAT, max_ts_IAT, var_ts_IAT,
           avg_pld_len, min_pld_len, max_pld_len, var_pld_len,
           ttl_bytes, sessn_dur, pkg_cnt, psh_cnt, sport, dport,
-          direction, mark,
+          direction, mark, sid,
           sc_avg_pkt_len, sc_min_pkt_len, sc_max_pkt_len, sc_var_pkt_len,
           sc_avg_ts_IAT, sc_min_ts_IAT, sc_max_ts_IAT, sc_var_ts_IAT,
           sc_avg_pld_len, sc_min_pld_len, sc_max_pld_len, sc_var_pld_len,
@@ -168,7 +169,7 @@ object ExtractSessionFeature {
         "avg_ts_IAT", "min_ts_IAT", "max_ts_IAT", "var_ts_IAT",
         "avg_pld_len", "min_pld_len", "max_pld_len", "var_pld_len",
         "total_bytes", "sessn_dur", "pkts_cnt", "psh_cnt", "sport", "dport",
-        "direction", "m",
+        "direction", "m", "sid",
         "sc_avg_pkt_len", "sc_min_pkt_len", "sc_max_pkt_len", "sc_var_pkt_len",
         "sc_avg_ts_IAT", "sc_min_ts_IAT", "sc_max_ts_IAT", "sc_var_ts_IAT",
         "sc_avg_pld_len", "sc_min_pld_len", "sc_max_pld_len", "sc_var_pld_len",
