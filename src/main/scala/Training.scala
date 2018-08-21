@@ -4,8 +4,8 @@ import java.security.MessageDigest
 
 import cc.xmccc.hbase.util.HBaseUtil
 import cc.xmccc.sparkdemo.schema.HBaseOpsUtil._
-import cc.xmccc.sparkdemo.schema.{FuzzySetAvgFeatureTable, SessionFeatureToExtract}
-import org.apache.spark.sql.SparkSession
+import cc.xmccc.sparkdemo.schema._
+import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 import it.nerdammer.spark.hbase._
 import org.apache.hadoop.hbase.{HBaseConfiguration, HColumnDescriptor, HTableDescriptor, TableName}
 import org.apache.hadoop.hbase.client.ConnectionFactory
@@ -13,8 +13,12 @@ import org.apache.hadoop.hbase.regionserver.KeyPrefixRegionSplitPolicy
 import org.apache.spark.mllib.fpm.FPGrowth
 import org.apache.spark.rdd.RDD
 import cc.xmccc.sparkdemo.Utils.repr_string
+import org.apache.hadoop.hbase.util.Bytes
 import shapeless.labelled.FieldType
 import shapeless.{Generic, LabelledGeneric, Poly1, Witness}
+import org.apache.spark.sql.functions.col
+
+import scala.util.Try
 
 object Training {
 
@@ -22,6 +26,7 @@ object Training {
   conf.set("hbase.master", "hmaster.hbase:60000")
   val conn = ConnectionFactory.createConnection(conf)
   val admin = conn.getAdmin()
+
   val sparkSession = SparkSession.builder()
     .appName("Training")
     .getOrCreate()
@@ -73,26 +78,41 @@ object Training {
       at{a => List(a)}
   }
 
-  def FuzzySetFeatureExtract(sessn_feature_rdd: RDD[SessionFeatureToExtract]): RDD[FuzzySetAvgFeatureTable] = {
+  def FuzzySetFeatureExtract(sessn_feature_rdd: RDD[NewSessionFeatureTable]): RDD[FuzzySetTable] = {
     val fuzzy_set_rdd = sessn_feature_rdd groupBy { x => BigInt(x.m) }
 
     val saved_rdd = fuzzy_set_rdd map {
       case (_, it) =>
         val list = it.toList
         val rowkey = MessageDigest.getInstance("MD5").digest(list(0).m)
-        val fm = list(0).m
-        val repr_list = list map { x => Generic[SessionFeatureToExtract].to(x)}
-        val repr_head :: repr_tail = repr_list
-        val repr_list_head = repr_head map toListPoly1
-        val list_hlist = repr_tail.foldLeft(repr_list_head) {
-          case (b, a) =>
-            val aAb = a zip b
-            aAb map pairConsPoly1
+        val m = list(0).m
+        val features_list = list.map(sessn_row =>
+          sessn_row.features_value
+        ).toArray
+
+        val features_names = list.lift(0).get.features_name
+
+        val feature_sequence = features_list.foldLeft(Array.fill(features_names.length)(Array.empty[Double])){
+          case(result, item) =>
+            val arr_i = result zip item
+            arr_i.map{case(arr, i) => arr :+ i}
         }
 
-        val avg_hlist = list_hlist.map(percentAvgCalcuPoly1)
+        val fuzzyset_features = feature_sequence.map{
+          feature =>
+            val avg = feature.sum / feature.length
+            val variance = feature.map(value => math.pow(value - avg, 2)).sum / feature.length
+            val std_deviation = math.pow(variance, 0.5)
+            val (left, right) = (avg - 0.5 * std_deviation, avg + 0.5 * std_deviation)
+            val feature_filtered = feature.filter(value => value >= left && value <= right)
+            val feature_filtered_avg = feature_filtered.sum / feature_filtered.length
 
-        Generic[FuzzySetAvgFeatureTable].from(rowkey :: fm :: (avg_hlist.tail.tail))
+            (feature_filtered.length.toDouble / feature.length.toDouble, feature_filtered_avg)
+        }
+
+        FuzzySetTable(
+          rowkey, Some(m), None, Some(features_names), Some(fuzzyset_features), None
+        )
     }
 
     saved_rdd
@@ -185,39 +205,33 @@ object Training {
     save_rdd
   }
 
-  def FuzzySetClustering(fuzzyset_feature_rdd: RDD[FuzzySetAvgFeatureTable]) = {
-    val kv_input_rdd: RDD[(Array[Byte], List[(String, (Double, Double))])] = fuzzyset_feature_rdd.map{
-      avg =>
-        val gen =  LabelledGeneric[FuzzySetAvgFeatureTable].to(avg)
-        val kv_fuzzy_set_feature = gen.tail.tail
-        val rowkey = gen.head
-        (rowkey, kv_fuzzy_set_feature.map(fieldTypePoly1).toList[(String, (Double, Double))])
+  def ProtoModelExtract(fuzzyset_feature_rdd: RDD[FuzzySetTable],
+                        model_table_rdd: RDD[ProtoModelTable]): (RDD[(Array[Byte], Array[Byte])], RDD[ProtoModelTable]) = {
+    val fuzzyset = fuzzyset_feature_rdd.collect
+    val model_table = model_table_rdd.collect
+
+    val fuzzyset_top10f = fuzzyset.map{
+      table =>
+        val name_features = table.features_name.get zip table.features_value.get
+        val top10_features = name_features.sortBy(_._2._1).reverse.take(10)
+        (table, top10_features)
     }
 
-    val sets = kv_input_rdd.collect.foldLeft(
-      List.empty[List[(Array[Byte], List[(String, (Double, Double))])]]
-    ){
-      case (Nil, (rowkey, cur)) =>
-        List((rowkey, cur)) :: Nil
-      case (collect, (rowkey, cur)) =>
-        val top_10_feature = cur.sortBy(_._2._1).reverse.take(10)
-        println("top 10 feature:")
-        println(top_10_feature)
-        println("current sets:")
-        println("[")
-        collect.map(x => x.map(_._2)).foreach{
-          x =>
-            println("\t[")
-            println("\t\t" + x.mkString("[", ",\n", "]"))
-            println("\t]")
-        }
-        val propotions_each_set = (0 to collect.length - 1).map{
+    val fuzzyset_models = fuzzyset_top10f.map{
+      case (fuzzyset_row, top10_features) =>
+        val clustering = (0 to model_table.length - 1).toStream.map{
           i =>
-            val (_, features) = collect(i)(0)
-            val features_map = features.toMap
-            top_10_feature.map{
-              case(k, v) =>
-                val value = features_map(k)._2 / v._2
+            val model_row = model_table(i)
+
+            println(model_table.length)
+            val features_map =
+              (model_row.features_name.get zip model_row.features_value.get).toMap
+
+            println(top10_features.map{case(k, (_, v)) => (k, features_map(k), v)}.toList)
+
+            val propotions = top10_features.map{
+              case(k, (_, v)) =>
+                val value = features_map(k)._2 / v
                 if(value.isInfinite)
                   0
                 else if (value.isNaN)
@@ -225,60 +239,53 @@ object Training {
                 else
                   value
             }
-        }
-        propotions_each_set.foreach{
-          x =>
-            println("\t[")
-            println("\t\t" + x.mkString("[", ",\n\t\t\t", "]"))
-            println("\t]")
-        }
-        val result = (0 to collect.length - 1).toStream.map{
-          i =>
-            val (_, features) = collect(i)(0)
-            val features_map = features.toMap
-            val propotions = top_10_feature
-              .map{
-                case(k, v) =>
-                  val value = features_map(k)._2 / v._2
-                  if(value.isInfinite)
-                    0
-                  else if (value.isNaN)
-                    1
-                  else
-                    value
-              }
-              .filter(x => x >= 0.4 && x <= 2.08)
-            if(propotions.length >= 8) {
-              val new_set = (rowkey, cur) :: collect(i)
-              new_set :: collect.drop(i + 1) ++ collect.take(i)
-            } else {
-              Nil
-            }
-        }.filter(l => l != Nil)
-          .take(1)
-          .lift(0)
+            val filtered_propotion = propotions.filter(x => x >= 0.4 && x <= 2.09)
 
-        result match {
+            println(propotions.toList)
+
+            if(filtered_propotion.length >= 8)
+              Some((fuzzyset_row, model_row))
+            else
+              None
+        }.filter(x => x != None).take(1).map(_.get).lift(0)
+
+        clustering match {
           case None =>
-            List((rowkey, cur)) :: collect
-          case Some(r) =>
-            r
+            (fuzzyset_row, None)
+          case Some((fuzzyset_row, model_row)) =>
+            (fuzzyset_row, Some(model_row))
         }
     }
 
-    val clustered_fuzzyset = sets.zipWithIndex.map{
-      case(items, cluster_id) =>
-        items.map{
-          case(rowkey, _) =>
-            (rowkey, cluster_id)
-        }
-    }.flatten
+    val new_fuzzyset_model = fuzzyset_models.filter(_._2 == None)
+    val old_fuzzyset_model = fuzzyset_models.filter(_._2 != None)
 
-    val saved_rdd = sparkSession.sparkContext.parallelize(clustered_fuzzyset)
+    val new_add_fuzzyset_model =
+      ((model_table.length to model_table.length + new_fuzzyset_model.length) zip new_fuzzyset_model)
+          .map{
+            case(i, (fuzzyset_row, _)) =>
+              val model_id_b = Bytes.toBytes("PROTOCOL" + i)
+              (fuzzyset_row,
+                Some(ProtoModelTable(
+                  model_id_b, Some(model_id_b), fuzzyset_row.features_name, fuzzyset_row.features_value,
+                  fuzzyset_row.keywords
+                ))
+              )
+          }
 
-    saved_rdd
+    val fuzzyset_models_new = new_add_fuzzyset_model ++ old_fuzzyset_model
+
+    val seted_id_in_fuzzyset = fuzzyset_models_new.map{
+      case(fuzzyset_row, model_row) =>
+        ((fuzzyset_row.rowkey, model_row.get.id.get), model_row)
+    }
+
+    val fuzzyset_rowkey_id = seted_id_in_fuzzyset.map(_._1)
+    val model = seted_id_in_fuzzyset.map(_._2.get)
+
+    (sparkSession.sparkContext.parallelize(fuzzyset_rowkey_id),
+    sparkSession.sparkContext.parallelize(model))
   }
-
 
   def main(args: Array[String]): Unit = {
     val input_table = args(0)
@@ -286,88 +293,79 @@ object Training {
     val save_table = args(2)
     val save_table2 = args(3)
     val fuzzyset_mark = args(4)
+    val fuzzyset_mark_b = fuzzyset_mark
+      .split('x')
+      .tail
+      .map(hexstr => Integer.parseInt(hexstr, 16).toByte)
 
-    val input_rdd = sparkSession.sparkContext.hbaseTable[SessionFeatureToExtract](input_table)
-      .select("m", "avg_pkt_len", "min_pkt_len", "max_pkt_len", "var_pkt_len",
-        "avg_ts_IAT", "min_ts_IAT", "max_ts_IAT", "var_ts_IAT",
-        "avg_pld_len", "min_pld_len", "max_pld_len", "var_pld_len",
-        "total_bytes", "sessn_dur", "pkts_cnt", "psh_cnt",
-        "sc_avg_pkt_len", "sc_min_pkt_len", "sc_max_pkt_len", "sc_var_pkt_len",
-        "sc_avg_ts_IAT", "sc_min_ts_IAT", "sc_max_ts_IAT", "sc_var_ts_IAT",
-        "sc_avg_pld_len", "sc_min_pld_len", "sc_max_pld_len", "sc_var_pld_len",
-        "sc_total_bytes", "sc_pkt_cnt",
-        "cs_avg_pkt_len", "cs_min_pkt_len", "cs_max_pkt_len", "cs_var_pkt_len",
-        "cs_avg_ts_IAT", "cs_min_ts_IAT", "cs_max_ts_IAT", "cs_var_ts_IAT",
-        "cs_avg_pld_len", "cs_min_pld_len", "cs_max_pld_len", "cs_var_pld_len",
-        "cs_total_bytes", "cs_pkt_cnt")
+    val input_rdd = this.sparkSession.sparkContext.hbaseTable[NewSessionFeatureTable](input_table2)
+      .select("sport", "dport", "direction", "m", "sid", "features_name", "features_value")
       .inColumnFamily("sessn")
 
-    val pld_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Option[Array[Byte]], Option[Array[Byte]], Option[Array[Byte]], Option[Array[Byte]])](input_table2)
+    val pld_rdd = this.sparkSession.sparkContext.hbaseTable[(Array[Byte], Option[Array[Byte]], Option[Array[Byte]], Option[Array[Byte]], Option[Array[Byte]])](input_table)
       .select("m", "sid", "direction", "payload")
       .inColumnFamily("p")
 
     val training_rdd = input_rdd.filter{
       features =>
-        BigInt(features.m) == BigInt(fuzzyset_mark)
+        BigInt(features.m) == BigInt(fuzzyset_mark_b)
     }
+
+    println(s"Fuzzset Mark: ${fuzzyset_mark}")
+    println(s"Session Number in this fuzzyset: ${training_rdd.count}")
 
     val keywords_training_rdd = pld_rdd.filter{
       item =>
-        BigInt(item._1) == BigInt(fuzzyset_mark)
+        BigInt(item._1) == BigInt(MessageDigest.getInstance("MD5").digest(fuzzyset_mark_b))
     }
 
     if (! admin.tableExists(TableName.valueOf(save_table)))
-      createPresplitTable(save_table, "p")
+      createPresplitTable(save_table, "fzset")
     if (! admin.tableExists(TableName.valueOf(save_table2)))
-      createPresplitTable(save_table2, "sessn")
+      createPresplitTable(save_table2, "model")
 
     val fuzzyset_feature_rdd = FuzzySetFeatureExtract(training_rdd)
 
     val fuzzyset_keywords_rdd = FuzzySetKeywordsExtract(keywords_training_rdd)
 
     fuzzyset_feature_rdd.toHBaseTable(save_table)
-      .toColumns("m", "avg_pkt_len", "min_pkt_len", "max_pkt_len", "var_pkt_len",
-        "avg_ts_IAT", "min_ts_IAT", "max_ts_IAT", "var_ts_IAT",
-        "avg_pld_len", "min_pld_len", "max_pld_len", "var_pld_len",
-        "total_bytes", "sessn_dur", "pkts_cnt", "psh_cnt",
-        "sc_avg_pkt_len", "sc_min_pkt_len", "sc_max_pkt_len", "sc_var_pkt_len",
-        "sc_avg_ts_IAT", "sc_min_ts_IAT", "sc_max_ts_IAT", "sc_var_ts_IAT",
-        "sc_avg_pld_len", "sc_min_pld_len", "sc_max_pld_len", "sc_var_pld_len",
-        "sc_total_bytes", "sc_pkt_cnt",
-        "cs_avg_pkt_len", "cs_min_pkt_len", "cs_max_pkt_len", "cs_var_pkt_len",
-        "cs_avg_ts_IAT", "cs_min_ts_IAT", "cs_max_ts_IAT", "cs_var_ts_IAT",
-        "cs_avg_pld_len", "cs_min_pld_len", "cs_max_pld_len", "cs_var_pld_len",
-        "cs_total_bytes", "cs_pkt_cnt")
-      .inColumnFamily("avg")
-      .save
+      .toColumns("m", "id", "features_name", "features_value", "keywords")
+      .inColumnFamily("fzset")
+      .save()
 
     fuzzyset_keywords_rdd.toHBaseTable(save_table)
       .toColumns("keywords")
-      .inColumnFamily("avg")
+      .inColumnFamily("fzset")
       .save()
 
-    val cluster_data_rdd = sparkSession.sparkContext.hbaseTable[FuzzySetAvgFeatureTable](input_table)
-      .select("m", "avg_pkt_len", "min_pkt_len", "max_pkt_len", "var_pkt_len",
-        "avg_ts_IAT", "min_ts_IAT", "max_ts_IAT", "var_ts_IAT",
-        "avg_pld_len", "min_pld_len", "max_pld_len", "var_pld_len",
-        "total_bytes", "sessn_dur", "pkts_cnt", "psh_cnt",
-        "sc_avg_pkt_len", "sc_min_pkt_len", "sc_max_pkt_len", "sc_var_pkt_len",
-        "sc_avg_ts_IAT", "sc_min_ts_IAT", "sc_max_ts_IAT", "sc_var_ts_IAT",
-        "sc_avg_pld_len", "sc_min_pld_len", "sc_max_pld_len", "sc_var_pld_len",
-        "sc_total_bytes", "sc_pkt_cnt",
-        "cs_avg_pkt_len", "cs_min_pkt_len", "cs_max_pkt_len", "cs_var_pkt_len",
-        "cs_avg_ts_IAT", "cs_min_ts_IAT", "cs_max_ts_IAT", "cs_var_ts_IAT",
-        "cs_avg_pld_len", "cs_min_pld_len", "cs_max_pld_len", "cs_var_pld_len",
-        "cs_total_bytes", "cs_pkt_cnt")
-      .inColumnFamily("avg")
+    val source_data_rdd = this.sparkSession.sparkContext.hbaseTable[FuzzySetTable](save_table)
+      .select("m", "id", "features_name", "features_value", "keywords")
+      .inColumnFamily("fzset")
 
-    val cluster_rdd = FuzzySetClustering(cluster_data_rdd)
-    cluster_rdd.toHBaseTable(save_table)
+    val old_model_rdd = this.sparkSession.sparkContext.hbaseTable[(Array[Byte], Option[Array[Byte]], Option[Array[String]], Option[Array[(Double, Double)]], Option[String])](save_table2)
+      .select("id", "features_name", "features_value", "keywords")
+      .inColumnFamily("model")
+      .map(item => ProtoModelTable(item._1, item._2, item._3, item._4, item._5))
+
+    val clustering_training_rdd = source_data_rdd
+        .filter(item => item.m != None && BigInt(item.m.get) == BigInt(fuzzyset_mark_b))
+
+    val (fuzzyset_rowkey_id_rdd, new_model_rdd) = ProtoModelExtract(clustering_training_rdd, old_model_rdd)
+    val cur_fzset_proto = Bytes.toString(fuzzyset_rowkey_id_rdd.collect()(0)._2)
+
+    println(s"Fuzzyset belong to protocol: ${cur_fzset_proto}")
+
+    fuzzyset_rowkey_id_rdd.toHBaseTable(save_table)
       .toColumns("id")
-      .inColumnFamily("avg")
+      .inColumnFamily("fzset")
       .save()
 
-    sparkSession.close()
+    new_model_rdd.toHBaseTable(save_table2)
+      .toColumns("id", "features_name", "features_value", "keywords")
+      .inColumnFamily("model")
+      .save()
+
+    this.sparkSession.close()
   }
 
   def createPresplitTable(name: String, cf: String): Unit = {

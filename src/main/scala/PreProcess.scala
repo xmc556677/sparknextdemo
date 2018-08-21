@@ -4,7 +4,7 @@ import java.security.MessageDigest
 
 import cc.xmccc.hbase.util.HBaseUtil
 import cc.xmccc.sparkdemo.schema.HBaseOpsUtil._
-import cc.xmccc.sparkdemo.schema.SessionFeatureTable
+import cc.xmccc.sparkdemo.schema.{NewSessionFeatureTable, ProtoModelTable, SessionFeatureTable}
 import org.apache.spark.sql.SparkSession
 import it.nerdammer.spark.hbase._
 import org.apache.hadoop.hbase.{HBaseConfiguration, HColumnDescriptor, HTableDescriptor, TableName}
@@ -186,7 +186,7 @@ object PreProcess {
           result._1.filter(_._2 != None).map(x => (x._1, x._2.get, x._3, x._4))
       }
 
-    sessions_list_rdd.flatMap(x => x)
+    sessions_list_rdd.flatMap(x => x).map(item => (item._1, item._2))
   }
 
   def Tuple5Extract(rawpkt_rdd: RDD[(Array[Byte], Array[Byte], Array[Byte])]): RDD[(Array[Byte], Array[Byte], Array[Byte], Array[Byte], Array[Byte], Array[Byte], Array[Byte], Array[Byte])] = {
@@ -307,7 +307,7 @@ object PreProcess {
     save_rdd
   }
 
-  def SessionFeatureExtract(pkts_rdd: RDD[(Array[Byte], Option[Array[Byte]], Array[Byte], Array[Byte])]): RDD[SessionFeatureTable] = {
+  def SessionFeatureExtract(pkts_rdd: RDD[(Array[Byte], Option[Array[Byte]], Array[Byte], Array[Byte])]): RDD[NewSessionFeatureTable] = {
 
     val sid_rdd = pkts_rdd.filter(_._2 != None).map(x => (x._1, x._2.get, x._3, x._4)).map{
       case(_, sid, ts, rawpacket) =>
@@ -410,20 +410,38 @@ object PreProcess {
 
         val mark = dip ++ dport ++ Array(proto.toByte)
 
-        SessionFeatureTable(
-          rowkey, avg_pkt_len, min_pkt_len, max_pkt_len, var_pkt_len,
-          avg_ts_IAT, min_ts_IAT, max_ts_IAT, var_ts_IAT,
+        val features_name = Array(
+          "avg_pkt_len", "min_pkt_len", "max_pkt_len", "var_pkt_len",
+          "avg_ts_IAT", "min_ts_IAT", "max_ts_IAT", "var_ts_IAT",
+          "avg_pld_len", "min_pld_len", "max_pld_len", "var_pld_len",
+          "total_bytes", "sessn_dur", "pkts_cnt", "psh_cnt",
+          "sc_avg_pkt_len", "sc_min_pkt_len", "sc_max_pkt_len", "sc_var_pkt_len",
+          "sc_avg_ts_IAT", "sc_min_ts_IAT", "sc_max_ts_IAT", "sc_var_ts_IAT",
+          "sc_avg_pld_len", "sc_min_pld_len", "sc_max_pld_len", "sc_var_pld_len",
+          "sc_total_bytes", "sc_pkt_cnt",
+          "cs_avg_pkt_len", "cs_min_pkt_len", "cs_max_pkt_len", "cs_var_pkt_len",
+          "cs_avg_ts_IAT", "cs_min_ts_IAT", "cs_max_ts_IAT", "cs_var_ts_IAT",
+          "cs_avg_pld_len", "cs_min_pld_len", "cs_max_pld_len", "cs_var_pld_len",
+          "cs_total_bytes", "cs_pkt_cnt"
+        )
+
+        val features_value: Array[Double] = Array(
+          avg_pkt_len, min_pkt_len, max_pkt_len, var_pkt_len,
+          avg_ts_IAT.toDouble, min_ts_IAT.toDouble, max_ts_IAT.toDouble, var_ts_IAT.toDouble,
           avg_pld_len, min_pld_len, max_pld_len, var_pld_len,
-          ttl_bytes, sessn_dur, pkg_cnt, psh_cnt, sport, dport,
-          direction, mark, sid,
+          ttl_bytes, sessn_dur.toDouble, pkg_cnt, psh_cnt,
           sc_avg_pkt_len, sc_min_pkt_len, sc_max_pkt_len, sc_var_pkt_len,
-          sc_avg_ts_IAT, sc_min_ts_IAT, sc_max_ts_IAT, sc_var_ts_IAT,
+          sc_avg_ts_IAT.toDouble, sc_min_ts_IAT.toDouble, sc_max_ts_IAT.toDouble, sc_var_ts_IAT.toDouble,
           sc_avg_pld_len, sc_min_pld_len, sc_max_pld_len, sc_var_pld_len,
           sc_ttl_bytes, sc_pkt_cnt,
           cs_avg_pkt_len, cs_min_pkt_len, cs_max_pkt_len, cs_var_pkt_len,
-          cs_avg_ts_IAT, cs_min_ts_IAT, cs_max_ts_IAT, cs_var_ts_IAT,
+          cs_avg_ts_IAT.toDouble, cs_min_ts_IAT.toDouble, cs_max_ts_IAT.toDouble, cs_var_ts_IAT.toDouble,
           cs_avg_pld_len, cs_min_pld_len, cs_max_pld_len, cs_var_pld_len,
           cs_ttl_bytes, cs_pkt_cnt
+        )
+
+        NewSessionFeatureTable(
+          rowkey, sport, dport, direction, mark, sid, features_name, features_value
         )
     }
     save_rdd
@@ -488,7 +506,7 @@ object PreProcess {
         .save
     packet_feature_rdd.toHBaseTable(save_table)
         .toColumns("dport", "sport", "proto", "tcp_flags", "pkt_len", "pld_len", "payload")
-        .toColumns("p")
+        .inColumnFamily("p")
         .save
     udp_sids.toHBaseTable(save_table)
         .toColumns("sid")
@@ -507,6 +525,7 @@ object PreProcess {
       .select("si", "sp", "di", "dp", "pr", "t", "sid")
       .inColumnFamily("p")
 
+
     val pkt_direction_m_rdd = PktDirectionAndFuzzySetMarkExtract(tuple5_sid_rdd)
 
     pkt_direction_m_rdd.toHBaseTable(save_table)
@@ -516,20 +535,11 @@ object PreProcess {
 
     val sessn_feature_rdd = SessionFeatureExtract(pkts_rdd)
 
+
     sessn_feature_rdd.toHBaseTable(save_table2)
-      .toColumns("avg_pkt_len", "min_pkt_len", "max_pkt_len", "var_pkt_len",
-        "avg_ts_IAT", "min_ts_IAT", "max_ts_IAT", "var_ts_IAT",
-        "avg_pld_len", "min_pld_len", "max_pld_len", "var_pld_len",
-        "total_bytes", "sessn_dur", "pkts_cnt", "psh_cnt", "sport", "dport",
-        "direction", "m", "sid",
-        "sc_avg_pkt_len", "sc_min_pkt_len", "sc_max_pkt_len", "sc_var_pkt_len",
-        "sc_avg_ts_IAT", "sc_min_ts_IAT", "sc_max_ts_IAT", "sc_var_ts_IAT",
-        "sc_avg_pld_len", "sc_min_pld_len", "sc_max_pld_len", "sc_var_pld_len",
-        "sc_total_bytes", "sc_pkt_cnt",
-        "cs_avg_pkt_len", "cs_min_pkt_len", "cs_max_pkt_len", "cs_var_pkt_len",
-        "cs_avg_ts_IAT", "cs_min_ts_IAT", "cs_max_ts_IAT", "cs_var_ts_IAT",
-        "cs_avg_pld_len", "cs_min_pld_len", "cs_max_pld_len", "cs_var_pld_len",
-        "cs_total_bytes", "cs_pkt_cnt")
+      .toColumns(
+        "sport", "dport", "direction", "m", "sid", "features_name", "features_value"
+      )
       .inColumnFamily("sessn")
       .save()
 

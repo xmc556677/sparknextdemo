@@ -44,7 +44,7 @@ object ExtractFuzzySetMark {
     val kv_input_rdd: RDD[(Array[Byte], List[(String, (Double, Double))])] = input_rdd.map{
       avg =>
         val gen =  LabelledGeneric[FuzzySetAvgFeatureTable].to(avg)
-        val kv_fuzzy_set_feature = gen.tail
+        val kv_fuzzy_set_feature = gen.tail.tail
         val rowkey = gen.head
         (rowkey, kv_fuzzy_set_feature.map(fieldTypePoly1).toList[(String, (Double, Double))])
     }

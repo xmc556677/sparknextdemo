@@ -2,6 +2,7 @@ package cc.xmccc.sparkdemo.schema
 
 import it.nerdammer.spark.hbase.conversion._
 import org.apache.hadoop.hbase.util.Bytes
+import org.apache.spark.sql.execution.datasources.hbase.RowKey
 import shapeless.{::, Generic, HList, HNil, Lazy, Poly, Poly1}
 
 case class SessionFeatureTable(
@@ -20,6 +21,17 @@ case class SessionFeatureTable(
                               cs_avg_ts_IAT: BigInt, cs_min_ts_IAT: BigInt, cs_max_ts_IAT: BigInt, cs_var_ts_IAT: Double,
                               cs_avg_pld_len: Int, cs_min_pld_len: Int, cs_max_pld_len: Int, cs_var_pld_len: Double,
                               cs_total_bytes: Long, cs_pkt_cnt: Long
+                              )
+
+case class NewSessionFeatureTable(
+                                rowkey: Array[Byte],
+                                sport: Array[Byte],
+                                dport: Array[Byte],
+                                direction: Array[Byte],
+                                m: Array[Byte],
+                                sid: Array[Byte],
+                                features_name: Array[String],
+                                features_value: Array[Double]
                               )
 
 case class SessionFeatureToExtract(
@@ -57,6 +69,20 @@ case class FuzzySetAvgFeatureTable(
                                     cs_total_bytes: (Double, Double), cs_pkt_cnt: (Double, Double)
                                   )
 
+case class ProtoModelTable(
+                            rowkey: Array[Byte], id: Option[Array[Byte]],
+                            features_name: Option[Array[String]],
+                            features_value: Option[Array[(Double, Double)]],
+                            keywords: Option[String]
+                          )
+
+case class FuzzySetTable(
+                        rowkey: Array[Byte], m: Option[Array[Byte]], id: Option[Array[Byte]],
+                        features_name: Option[Array[String]],
+                        features_value: Option[Array[(Double, Double)]],
+                        keywords: Option[String]
+                        )
+
 object HBaseOpsUtil {
 
   implicit def hnilReader: FieldReader[HNil] =
@@ -90,6 +116,29 @@ object HBaseOpsUtil {
 
   implicit def bigintReader: FieldReader[BigInt] = new SingleColumnConcreteFieldReader[BigInt] {
     override def columnMap(cols: Array[Byte]): BigInt = BigInt(Array(0.toByte) ++ cols)
+  }
+
+  implicit def doublearrayReader: FieldReader[Array[Double]] = new SingleColumnConcreteFieldReader[Array[Double]] {
+    override def columnMap(cols: Array[Byte]): Array[Double] =
+      (0 to ((cols.length - 1) / 8))
+        .map(i => Bytes.toDouble(cols.slice(i * 8, (i + 1) * 8))).toArray
+  }
+
+  implicit def stringarrayReader: FieldReader[Array[String]] = new SingleColumnConcreteFieldReader[Array[String]] {
+    override def columnMap(cols: Array[Byte]): Array[String] =
+      Bytes.toString(cols).split(',')
+  }
+
+  implicit def tuple2doublearrayReader: FieldReader[Array[(Double, Double)]] = new SingleColumnConcreteFieldReader[Array[(Double, Double)]] {
+    override def columnMap(cols: Array[Byte]): Array[(Double, Double)] = {
+      (0 to ((cols.length - 1) / 16)).map(_ * 2)
+        .map {
+          i =>
+            val i1 = cols.slice(i * 8, (i + 1) * 8)
+            val i2 = cols.slice((i + 1) * 8, (i + 2) * 8)
+            (Bytes.toDouble(i1), Bytes.toDouble(i2))
+        }.toArray
+    }
   }
 
   implicit def tuple2doubleReader: FieldReader[(Double, Double)] = new SingleColumnConcreteFieldReader[(Double, Double)] {
@@ -134,6 +183,21 @@ object HBaseOpsUtil {
   implicit def tuple2doubleWriter: FieldWriter[(Double, Double)] = new SingleColumnFieldWriter[(Double, Double)] {
     override def mapColumn(data: (Double, Double)): Option[Array[Byte]] =
       Some(Bytes.toBytes(data._1) ++ Bytes.toBytes(data._2))
+  }
+
+  implicit def tuple2doublearrayWriter: FieldWriter[Array[(Double, Double)]] = new SingleColumnFieldWriter[Array[(Double, Double)]] {
+    override def mapColumn(data: Array[(Double, Double)]): Option[Array[Byte]] =
+      Some(data.map(i => Bytes.toBytes(i._1) ++ Bytes.toBytes(i._2)).flatten)
+  }
+
+  implicit def doublearrayWriter: FieldWriter[Array[Double]] = new SingleColumnFieldWriter[Array[Double]] {
+    override def mapColumn(data: Array[Double]): Option[Array[Byte]] =
+      Some(data.map(d => Bytes.toBytes(d)).flatten)
+  }
+
+  implicit def stringarrayWriter: FieldWriter[Array[String]] = new SingleColumnFieldWriter[Array[String]] {
+    override def mapColumn(data: Array[String]): Option[Array[Byte]] =
+      Some(Bytes.toBytes(data.mkString(",")))
   }
 }
 
