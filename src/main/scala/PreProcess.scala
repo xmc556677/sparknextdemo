@@ -543,9 +543,9 @@ object PreProcess {
       .inColumnFamily("sessn")
       .save()
 
-    println(s"TCP session count: ${tcp_sids.count}")
-    println(s"UDP session count: ${udp_sids.count}")
-    println(s"ICMP session count: 0")
+    println(s"TCP会话数量: ${tcp_sids.count}")
+    println(s"UDP会话数量: ${udp_sids.count}")
+    println(s"ICMP会话数量: 0")
 
     sparkSession.close()
   }

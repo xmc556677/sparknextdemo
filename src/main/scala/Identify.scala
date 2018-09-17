@@ -6,7 +6,7 @@ import cc.xmccc.sparkdemo.schema.{NewSessionFeatureTable, ProtoModelTable}
 import it.nerdammer.spark.hbase._
 import org.apache.hadoop.hbase.util.Bytes
 
-object Recognize {
+object Identify {
   def main(args: Array[String]): Unit = {
     val sparkSession = SparkSession.builder()
       .appName("Recognize")
@@ -15,16 +15,20 @@ object Recognize {
     val input_table = args(0)
     val input_table2 = args(1)
     val session_id = args(2)
-    val session_id_b = session_id
-      .split("\\\\x")
-      .tail
-      .map(hexstr => Integer.parseInt(hexstr, 16).toByte)
+    val session_id_b = (0 to session_id.length-1 by 2).map{
+      i =>
+        val hex = session_id.slice(i, i+2)
+        Integer.parseInt(hex, 16).toByte
+    }.toArray
 
     val session_table_rdd = sparkSession.sparkContext.hbaseTable[NewSessionFeatureTable](input_table)
       .select("sport", "dport", "direction", "m", "sid", "features_name", "features_value")
       .inColumnFamily("sessn")
 
-    val model_rdd = sparkSession.sparkContext.hbaseTable[ProtoModelTable](input_table2)
+    val model_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Option[Array[Byte]], Option[Array[String]], Option[Array[(Double, Double)]], Option[String])](input_table2)
+      .select("id", "features_name", "features_value", "keywords")
+      .inColumnFamily("model")
+      .map(item => ProtoModelTable(item._1, item._2, item._3, item._4, item._5))
 
     val session_row = session_table_rdd
       .filter(row => BigInt(row.rowkey) == BigInt(session_id_b))
@@ -65,10 +69,10 @@ object Recognize {
       .collect
       .lift(0)
 
-    println(s"Session id: ${session_id}")
+    println(s"会话标识: ${session_id}")
     result match {
-      case Some(proto) => println(s"Corespond Protocol: ${proto}")
-      case None => println(s"Corespond Protocol: None")
+      case Some(proto) => println(s"对应协议: ${proto.get}")
+      case None => println(s"对应协议: None")
     }
   }
 }

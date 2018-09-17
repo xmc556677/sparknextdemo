@@ -159,13 +159,6 @@ object Training {
             m == mark
         }.map(_._2.map(_._1)).sample(false, 0.05)
 
-        println("[\n")
-        fuzzyset_direction_rdd.collect.foreach{
-          x =>
-            println("\t" + x.map(x => repr_string(x)).mkString("[", ",", "]"))
-        }
-        println("]\n")
-
         val fpg = new FPGrowth()
           .setMinSupport(0.2)
           .setNumPartitions(10)
@@ -173,16 +166,6 @@ object Training {
         val rowkey = MessageDigest.getInstance("MD5").digest(mark._1.toByteArray)
 
         (rowkey, fpg.run(fuzzyset_direction_rdd))
-    }
-
-    models.foreach{
-      case (_, model) =>
-        println(s"model: $model")
-
-        model.freqItemsets.take(100).foreach{
-          itemset =>
-            println(itemset.items.map(x => repr_string(x)).mkString("[", ",", "]") + ","+ itemset.freq)
-        }
     }
 
     val fuzzyset_keywords = models.map{
@@ -210,28 +193,25 @@ object Training {
     val fuzzyset = fuzzyset_feature_rdd.collect
     val model_table = model_table_rdd.collect
 
-    val fuzzyset_top10f = fuzzyset.map{
+    val fuzzyset_map = fuzzyset.map{
       table =>
         val name_features = table.features_name.get zip table.features_value.get
-        val top10_features = name_features.sortBy(_._2._1).reverse.take(10)
-        (table, top10_features)
+        (table, name_features.toMap)
     }
 
-    val fuzzyset_models = fuzzyset_top10f.map{
-      case (fuzzyset_row, top10_features) =>
+    val fuzzyset_models = fuzzyset_map.map{
+      case (fuzzyset_row, fzset_map) =>
         val clustering = (0 to model_table.length - 1).toStream.map{
           i =>
             val model_row = model_table(i)
 
-            println(model_table.length)
-            val features_map =
-              (model_row.features_name.get zip model_row.features_value.get).toMap
-
-            println(top10_features.map{case(k, (_, v)) => (k, features_map(k), v)}.toList)
+            val top10_features =
+              (model_row.features_name.get zip model_row.features_value.get)
+                .sortBy(_._2._1).reverse.take(10)
 
             val propotions = top10_features.map{
               case(k, (_, v)) =>
-                val value = features_map(k)._2 / v
+                val value = fzset_map(k)._2 / v
                 if(value.isInfinite)
                   0
                 else if (value.isNaN)
@@ -264,7 +244,7 @@ object Training {
       ((model_table.length to model_table.length + new_fuzzyset_model.length) zip new_fuzzyset_model)
           .map{
             case(i, (fuzzyset_row, _)) =>
-              val model_id_b = Bytes.toBytes("PROTOCOL" + i)
+              val model_id_b = Bytes.toBytes("WX%03d".format(i))
               (fuzzyset_row,
                 Some(ProtoModelTable(
                   model_id_b, Some(model_id_b), fuzzyset_row.features_name, fuzzyset_row.features_value,
@@ -293,10 +273,11 @@ object Training {
     val save_table = args(2)
     val save_table2 = args(3)
     val fuzzyset_mark = args(4)
-    val fuzzyset_mark_b = fuzzyset_mark
-      .split('x')
-      .tail
-      .map(hexstr => Integer.parseInt(hexstr, 16).toByte)
+    val fuzzyset_mark_b = (0 to fuzzyset_mark.length-1 by 2).map{
+      i =>
+        val hex = fuzzyset_mark.slice(i, i+2)
+        Integer.parseInt(hex, 16).toByte
+    }.toArray
 
     val input_rdd = this.sparkSession.sparkContext.hbaseTable[NewSessionFeatureTable](input_table2)
       .select("sport", "dport", "direction", "m", "sid", "features_name", "features_value")
@@ -311,12 +292,12 @@ object Training {
         BigInt(features.m) == BigInt(fuzzyset_mark_b)
     }
 
-    println(s"Fuzzset Mark: ${fuzzyset_mark}")
-    println(s"Session Number in this fuzzyset: ${training_rdd.count}")
+    println(s"粗分类标识: ${fuzzyset_mark}")
+    println(s"该粗分类中的会话数量: ${training_rdd.count}")
 
     val keywords_training_rdd = pld_rdd.filter{
       item =>
-        BigInt(item._1) == BigInt(MessageDigest.getInstance("MD5").digest(fuzzyset_mark_b))
+        item._2 != None && BigInt(item._2.get) == BigInt(fuzzyset_mark_b)
     }
 
     if (! admin.tableExists(TableName.valueOf(save_table)))
@@ -326,7 +307,8 @@ object Training {
 
     val fuzzyset_feature_rdd = FuzzySetFeatureExtract(training_rdd)
 
-    val fuzzyset_keywords_rdd = FuzzySetKeywordsExtract(keywords_training_rdd)
+    //val fuzzyset_keywords_rdd = FuzzySetKeywordsExtract(keywords_training_rdd)
+    val fuzzyset_keywords_rdd = sparkSession.sparkContext.parallelize(Seq.empty[(Array[Byte], String)])
 
     fuzzyset_feature_rdd.toHBaseTable(save_table)
       .toColumns("m", "id", "features_name", "features_value", "keywords")
@@ -353,7 +335,8 @@ object Training {
     val (fuzzyset_rowkey_id_rdd, new_model_rdd) = ProtoModelExtract(clustering_training_rdd, old_model_rdd)
     val cur_fzset_proto = Bytes.toString(fuzzyset_rowkey_id_rdd.collect()(0)._2)
 
-    println(s"Fuzzyset belong to protocol: ${cur_fzset_proto}")
+    println(s"推荐使用的关键词: ${fuzzyset_keywords_rdd.collect.map(_._2).toList}")
+    println(s"该粗分类所属协议: ${cur_fzset_proto}")
 
     fuzzyset_rowkey_id_rdd.toHBaseTable(save_table)
       .toColumns("id")
