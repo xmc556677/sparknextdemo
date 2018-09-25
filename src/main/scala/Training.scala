@@ -307,8 +307,8 @@ object Training {
 
     val fuzzyset_feature_rdd = FuzzySetFeatureExtract(training_rdd)
 
-    //val fuzzyset_keywords_rdd = FuzzySetKeywordsExtract(keywords_training_rdd)
-    val fuzzyset_keywords_rdd = sparkSession.sparkContext.parallelize(Seq.empty[(Array[Byte], String)])
+    val fuzzyset_keywords_rdd = FuzzySetKeywordsExtract(keywords_training_rdd)
+    //val fuzzyset_keywords_rdd = sparkSession.sparkContext.parallelize(Seq.empty[(Array[Byte], String)])
 
     fuzzyset_feature_rdd.toHBaseTable(save_table)
       .toColumns("m", "id", "features_name", "features_value", "keywords")
