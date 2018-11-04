@@ -35,7 +35,7 @@ object ExtractTCPSessionM2 {
     val save_table = args(1)
 
     val input_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Array[Byte], Array[Byte], Array[Byte], Array[Byte], Array[Byte], Array[Byte], Array[Byte], Array[Byte])](input_table)
-      .select("di", "si", "dp", "sp", "pr", "t", "r", "m" )
+      .select("di", "si", "dp", "sp", "pr", "t", "r", "fm" )
       .inColumnFamily("p")
 
     if (! admin.tableExists(TableName.valueOf(save_table)))

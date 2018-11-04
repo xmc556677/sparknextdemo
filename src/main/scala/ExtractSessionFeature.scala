@@ -49,7 +49,7 @@ object ExtractSessionFeature {
         val sid_md5_b = MessageDigest.getInstance("MD5").digest(sid)
         val sid_md5_n = BigInt(sid_md5_b)
 
-        (sid_md5_n, sid_md5_b, ts, rawpacket)
+        (sid_md5_n, sid_md5_b, ts, rawpacket, sid)
     }
 
     val sid_group_rdd = sid_rdd.groupBy(_._1).cache()
@@ -60,12 +60,12 @@ object ExtractSessionFeature {
         val datas_ = ds
           .sortBy(x => BigInt(Array(0.toByte) ++ x._3))
           .map{
-            case (_, _, ts_b, rawpkt) =>
+            case (_, _, ts_b, rawpkt, sid) =>
               (BigInt(Array(0.toByte) ++ ts_b), parsePacket(rawpkt), rawpkt)
           }
         val datas = ds.sortBy(x => BigInt(Array(0.toByte) ++ x._3))
         val rowkey = datas(0)._2
-        val sid = datas(0)._2
+        val sid = datas(0)._5
         val tss = datas.map(x => BigInt(Array(0.toByte) ++ x._3))
         val ts_IAT = (tss zip tss.drop(1)) map {case (x, y) => y - x}
         val raw_pkt_lens = datas.map(_._4.length)

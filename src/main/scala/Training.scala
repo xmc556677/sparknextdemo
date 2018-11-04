@@ -189,7 +189,8 @@ object Training {
   }
 
   def ProtoModelExtract(fuzzyset_feature_rdd: RDD[FuzzySetTable],
-                        model_table_rdd: RDD[ProtoModelTable]): (RDD[(Array[Byte], Array[Byte])], RDD[ProtoModelTable]) = {
+                        model_table_rdd: RDD[ProtoModelTable],
+                        protocol_name: String): (RDD[(Array[Byte], Array[Byte])], RDD[ProtoModelTable]) = {
     val fuzzyset = fuzzyset_feature_rdd.collect
     val model_table = model_table_rdd.collect
 
@@ -244,7 +245,8 @@ object Training {
       ((model_table.length to model_table.length + new_fuzzyset_model.length) zip new_fuzzyset_model)
           .map{
             case(i, (fuzzyset_row, _)) =>
-              val model_id_b = Bytes.toBytes("WX%03d".format(i))
+              //val model_id_b = Bytes.toBytes("WZ%03d".format(i))
+              val model_id_b = Bytes.toBytes(protocol_name)
               (fuzzyset_row,
                 Some(ProtoModelTable(
                   model_id_b, Some(model_id_b), fuzzyset_row.features_name, fuzzyset_row.features_value,
@@ -273,6 +275,8 @@ object Training {
     val save_table = args(2)
     val save_table2 = args(3)
     val fuzzyset_mark = args(4)
+    val protocol_name = args(5)
+
     val fuzzyset_mark_b = (0 to fuzzyset_mark.length-1 by 2).map{
       i =>
         val hex = fuzzyset_mark.slice(i, i+2)
@@ -332,7 +336,7 @@ object Training {
     val clustering_training_rdd = source_data_rdd
         .filter(item => item.m != None && BigInt(item.m.get) == BigInt(fuzzyset_mark_b))
 
-    val (fuzzyset_rowkey_id_rdd, new_model_rdd) = ProtoModelExtract(clustering_training_rdd, old_model_rdd)
+    val (fuzzyset_rowkey_id_rdd, new_model_rdd) = ProtoModelExtract(clustering_training_rdd, old_model_rdd, protocol_name)
     val cur_fzset_proto = Bytes.toString(fuzzyset_rowkey_id_rdd.collect()(0)._2)
 
     println(s"推荐使用的关键词: ${fuzzyset_keywords_rdd.collect.map(_._2).toList}")

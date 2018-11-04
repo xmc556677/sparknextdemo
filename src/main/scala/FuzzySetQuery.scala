@@ -4,7 +4,7 @@ import cc.xmccc.sparkdemo.schema.HBaseOpsUtil._
 import cc.xmccc.sparkdemo.schema.{FuzzySetTable, NewSessionFeatureTable}
 import org.apache.spark.sql.SparkSession
 import it.nerdammer.spark.hbase._
-import org.apache.spark.sql.functions.{col, udf}
+import org.apache.spark.sql.functions.{col, udf, desc}
 
 object FuzzySetQuery{
 
@@ -29,7 +29,15 @@ object FuzzySetQuery{
 
     val fuzzyset_df = sessions_rdd.map(x => x).toDS
 
-    fuzzyset_df.select(convert_binary_tostirng_udf(col("m"))).distinct().show()
+    //fuzzyset_df.select(convert_binary_tostirng_udf(col("m")) as "m").distinct().show()
+    fuzzyset_df
+      .select(convert_binary_tostirng_udf(col("m")) as "m")
+      .groupBy("m")
+      .count()
+      .sort(desc("count"))
+      .select(col("m"))
+      .collect()
+      .foreach{row => println(row.getAs[String](0))}
 
     sparkSession.close()
   }
