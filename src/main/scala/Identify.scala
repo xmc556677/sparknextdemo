@@ -46,7 +46,7 @@ object Identify {
     val recognize_result = model_rdd.map{
       model_row =>
         val name_features = model_row.features_name.get zip model_row.features_value.get
-        val top10_features = name_features.sortBy(_._2._1).reverse.take(10)
+        val top10_features = name_features.sortBy(_._2._1).reverse.take(9)
         val proportion = top10_features.map{
           case(k, (_, v)) =>
             val value = v / broad_feature_map.value._2(k)

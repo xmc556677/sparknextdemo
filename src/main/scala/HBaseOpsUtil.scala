@@ -73,14 +73,16 @@ case class ProtoModelTable(
                             rowkey: Array[Byte], id: Option[Array[Byte]],
                             features_name: Option[Array[String]],
                             features_value: Option[Array[(Double, Double)]],
-                            keywords: Option[String]
+                            fkeywords: Option[String],
+                            bkeywords: Option[String]
                           )
 
 case class FuzzySetTable(
                         rowkey: Array[Byte], m: Option[Array[Byte]], id: Option[Array[Byte]],
                         features_name: Option[Array[String]],
                         features_value: Option[Array[(Double, Double)]],
-                        keywords: Option[String]
+                        fkeywords: Option[String],
+                        bkeywords: Option[String]
                         )
 
 object HBaseOpsUtil {

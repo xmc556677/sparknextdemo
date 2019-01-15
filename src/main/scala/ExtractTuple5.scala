@@ -7,7 +7,7 @@ import org.apache.hadoop.hbase.{HBaseConfiguration, HColumnDescriptor, HTableDes
 import org.apache.hadoop.hbase.client.ConnectionFactory
 import org.apache.hadoop.hbase.regionserver.KeyPrefixRegionSplitPolicy
 import org.apache.hadoop.hbase.util.Bytes
-import org.pcap4j.packet._
+import org.pcap4j.packet.{IpV4Packet, TcpPacket, UdpPacket, Packet}
 import org.pcap4j.packet.factory.PacketFactories
 import org.pcap4j.packet.namednumber.{DataLinkType, IpNumber}
 

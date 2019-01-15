@@ -18,7 +18,7 @@ object IdentifyPercentageCalculate {
     val dest_proto = args(2)
 
     val model_rdd = sparkSession.sparkContext.hbaseTable[ProtoModelTable](model_table)
-      .select("id", "features_name", "features_value", "keywords")
+      .select("id", "features_name", "features_value", "fkeywords", "bkeywords")
       .inColumnFamily("model")
 
     val sessn_rdd = sparkSession.sparkContext.hbaseTable[NewSessionFeatureTable](sessn_table)
@@ -39,7 +39,7 @@ object IdentifyPercentageCalculate {
 
     val broad_model = sparkSession.sparkContext.broadcast(models)
 
-    val identify_result = sessions_featuremap_rdd.map{
+/*    val identify_result = sessions_featuremap_rdd.map{
       case (_, feature_map) =>
         val identify_result =
           broad_model.value.toStream.map{
@@ -56,7 +56,7 @@ object IdentifyPercentageCalculate {
                     value
               }.filter(x => x >= 0.4 && x <= 2.08)
 
-              if(proportion.length >= 8)
+              if(proportion.length >= 9)
                 Some(Bytes.toString(table.rowkey))
               else
                 None
@@ -65,15 +65,37 @@ object IdentifyPercentageCalculate {
         val result = identify_result.filter(_ != None).map(_.get).take(1).lift(0)
 
         result
+    }*/
+
+    val result = models.map{
+      case(table, model_feature_map) =>
+        val top10_features = model_feature_map.toList.sortBy(_._2._1).reverse.take(10)
+        val result = sessions_featuremap_rdd.map{
+          case(_, feature_map) =>
+            val proportion = top10_features.map{
+              case(k, (_, v)) =>
+                val value = v / feature_map.get(k).get
+                if(value.isInfinite)
+                  0
+                else if (value.isNaN)
+                  1
+                else
+                  value
+            }.filter(x => x >= 0.4 && x <= 2.08)
+
+            if(proportion.length >= 9)
+              true
+            else
+              false
+        }
+        val accurancy = result.filter(x => x).count / result.count().toDouble
+        (Bytes.toString(table.id.get), accurancy)
     }
 
-    val postive_count = identify_result.filter{
-      _ match {
-        case Some(n) => n == dest_proto
-        case _ => false
-      }
-    }.count
-
-    println(s"Correct Identify Count: ${postive_count} / ${identify_result.count}")
+    println("proto\taccurancy")
+    result.foreach{
+      case(proto, accurancy) =>
+        println(s"$proto\t$accurancy")
+    }
   }
 }

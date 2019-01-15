@@ -31,7 +31,7 @@ object ExtractFuzzySetFeature {
           val avg = num.toDouble(a.sum) / a.length
           val variane = a.map(x => math.pow(num.toDouble(x) - avg, 2)).sum / a.length
           val std_deviation = math.pow(variane, 0.5)
-          val (left, right) = (avg - 0.5 * std_deviation, avg + 0.5 * std_deviation)
+          val (left, right) = (avg - 0.6 * std_deviation, avg + 0.6 * std_deviation)
           val a_filtered = a filter {
             x =>
               val n = num.toDouble(x)
@@ -40,6 +40,7 @@ object ExtractFuzzySetFeature {
           val avg_filtered = num.toDouble(a_filtered.sum) / a_filtered.length
 
           (a_filtered.length.toDouble / a.length.toDouble, avg_filtered)
+          //(a_filtered.length.toDouble, a.length.toDouble)
       }
 
     implicit val arraybyteCase: Case.Aux[List[Array[Byte]], (Double, Double)] =
@@ -81,6 +82,12 @@ object ExtractFuzzySetFeature {
 
     val fuzzy_set_rdd = input_rdd groupBy { x => BigInt(x.m) }
 
+    fuzzy_set_rdd.collect.foreach{
+      case(_, sessions) =>
+        val sessn_list = sessions.toList
+        if(sessn_list.length == 2)
+          println(sessions.toList)
+    }
 
     val saved_rdd = fuzzy_set_rdd map {
       case (_, it) =>

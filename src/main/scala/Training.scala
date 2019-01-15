@@ -111,7 +111,7 @@ object Training {
         }
 
         FuzzySetTable(
-          rowkey, Some(m), None, Some(features_names), Some(fuzzyset_features), None
+          rowkey, Some(m), None, Some(features_names), Some(fuzzyset_features), None, None
         )
     }
 
@@ -250,7 +250,7 @@ object Training {
               (fuzzyset_row,
                 Some(ProtoModelTable(
                   model_id_b, Some(model_id_b), fuzzyset_row.features_name, fuzzyset_row.features_value,
-                  fuzzyset_row.keywords
+                  fuzzyset_row.fkeywords, fuzzyset_row.bkeywords
                 ))
               )
           }
@@ -328,10 +328,10 @@ object Training {
       .select("m", "id", "features_name", "features_value", "keywords")
       .inColumnFamily("fzset")
 
-    val old_model_rdd = this.sparkSession.sparkContext.hbaseTable[(Array[Byte], Option[Array[Byte]], Option[Array[String]], Option[Array[(Double, Double)]], Option[String])](save_table2)
-      .select("id", "features_name", "features_value", "keywords")
+    val old_model_rdd = this.sparkSession.sparkContext.hbaseTable[(Array[Byte], Option[Array[Byte]], Option[Array[String]], Option[Array[(Double, Double)]], Option[String], Option[String])](save_table2)
+      .select("id", "features_name", "features_value", "fkeywords", "bkeywords")
       .inColumnFamily("model")
-      .map(item => ProtoModelTable(item._1, item._2, item._3, item._4, item._5))
+      .map(item => ProtoModelTable(item._1, item._2, item._3, item._4, item._5, item._6))
 
     val clustering_training_rdd = source_data_rdd
         .filter(item => item.m != None && BigInt(item.m.get) == BigInt(fuzzyset_mark_b))

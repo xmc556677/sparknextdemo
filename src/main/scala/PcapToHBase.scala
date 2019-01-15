@@ -61,6 +61,8 @@ object PcapToHbase {
           .save()
       broad.destroy()
     }
+
+    sparkSession.close()
   }
 
   class MaxLengthPacketIterator(val pcapHandle: PcapHandle, val max_size: Int) extends Iterator[Array[(Int, Int, Int, Array[Byte])]] {

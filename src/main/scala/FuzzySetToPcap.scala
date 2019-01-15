@@ -5,10 +5,9 @@ import java.io.{BufferedOutputStream, FileOutputStream}
 import it.nerdammer.spark.hbase._
 import org.apache.hadoop.hbase.util.Bytes
 import org.apache.spark.sql.SparkSession
-import cc.xmccc.sparkdemo.Utils.repr_string
 
 
-object SessionToPcap {
+object FuzzySetToPcap {
 
   val PCAP_HEADER: Array[Byte] =
     Array(0xd4, 0xc3, 0xb2, 0xa1, 0x02, 0x00, 0x04, 0x00,
@@ -21,7 +20,8 @@ object SessionToPcap {
       .getOrCreate()
 
     val table = args(0)
-    val op_id = args(1)
+    val output_name = args(1)
+    val op_id = args(2)
     val op_id_b = (0 to op_id.length-1 by 2).map{
       i =>
         val hex = op_id.slice(i, i+2)
@@ -29,7 +29,7 @@ object SessionToPcap {
     }.toArray
 
     val packet_table = sparkSession.sparkContext.hbaseTable[(Array[Byte], Array[Byte], Array[Byte], Option[Array[Byte]])](table)
-      .select("r", "t", "sid")
+      .select("r", "t", "m")
       .inColumnFamily("p")
       .filter{
         _ match {
@@ -43,8 +43,8 @@ object SessionToPcap {
     val op_id_b_broadcast = sparkSession.sparkContext.broadcast(op_id_b)
 
     val result_collect = packet_table.filter{
-      case(_, _, _, sid) =>
-        BigInt(sid) == BigInt(op_id_b)
+      case(_, _, _, m) =>
+        BigInt(m) == BigInt(op_id_b)
     } map { row => (row._2, row._3) } collect
 
     println(result_collect.length)
@@ -58,7 +58,7 @@ object SessionToPcap {
         (ts, ts_sec.toInt, ts_usec, pkt)
     }
 
-    val bos = new BufferedOutputStream(new FileOutputStream("debug.pcap"))
+    val bos = new BufferedOutputStream(new FileOutputStream(output_name))
     bos.write(PCAP_HEADER)
 
     ts_uts_raw_pkt.sortBy(_._1).foreach{

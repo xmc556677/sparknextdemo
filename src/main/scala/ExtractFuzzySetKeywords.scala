@@ -10,7 +10,7 @@ import cc.xmccc.sparkdemo.Utils.repr_string
 import cc.xmccc.sparkdemo.schema.HBaseOpsUtil._
 import org.apache.spark.rdd.RDD
 
-object FPGrowth {
+object ExtractFuzzySetKeywords {
   def slicePacket(str: Array[Byte], n: Int): List[Array[Byte]] =
     (0 to str.length - n).map(i => str.slice(i, i+n)).toList
 
@@ -18,20 +18,45 @@ object FPGrowth {
     str.toCharArray.map(_.toByte)
   }
 
+  def stringHexToByteArray(str: String): Array[Byte] = {
+    (0 to str.length-1 by 2).map{
+      i =>
+        val hex = str.slice(i, i+2)
+        Integer.parseInt(hex, 16).toByte
+    }.toArray
+  }
+
+  def stringHexToString(str: String): String = {
+    (0 to str.length-1 by 2).map{
+      i =>
+        val hex = str.slice(i, i+2)
+        Integer.parseInt(hex, 16).toChar
+    }.mkString("")
+  }
+
   def main(args: Array[String]): Unit = {
     val sparkSession = SparkSession.builder()
-      .appName("FPGrowth")
+      .appName("ExtractFuzzySetKeywords")
       .getOrCreate()
 
     val input_table = args(0)
     val save_table = args(1)
+    val n = Integer.parseInt(args(2))
+    val fzset_id = args(3)
+    val fzset_id_b = (0 to fzset_id.length-1 by 2).map{
+      i =>
+        val hex = fzset_id.slice(i, i+2)
+        Integer.parseInt(hex, 16).toByte
+    }.toArray
 
-    val input_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Option[Array[Byte]], Option[Array[Byte]], Option[Array[Byte]], Option[Array[Byte]])](input_table)
-      .select("fm", "sid", "direction", "payload")
+    sparkSession.sparkContext.getConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+
+    val input_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Option[Array[Byte]], Option[Array[Byte]], Option[String], Option[Array[Byte]])](input_table)
+      .select("m", "sid", "direction", "payload")
       .inColumnFamily("p")
 
     val sessn_pkts_rdd = input_rdd.filter{
-      case(_, Some(_), Some(_), Some(_), _) => true
+      case(_, Some(m), Some(_), Some(_), _) => BigInt(m) == BigInt(fzset_id_b)
       case _ => false
     }
 
@@ -39,12 +64,12 @@ object FPGrowth {
 
     val fuzzyset_direction_sessn_rdd = sessn_pkts_rdd.groupBy{
       case(_, Some(fuzzyset_mark), Some(session_mark), Some(direction), _) =>
-        (BigInt(fuzzyset_mark), BigInt(session_mark), BigInt(direction))
+        (BigInt(fuzzyset_mark), BigInt(session_mark), direction)
     }
 
     val fuzzyset_directions = sessn_pkts_rdd.groupBy{
       case(_, Some(fuzzyset_mark), Some(session_mark), Some(direction), _) =>
-        (BigInt(fuzzyset_mark), BigInt(direction))
+        (BigInt(fuzzyset_mark), direction)
     }.map{case((fuzzy_mark, direction), _) => (fuzzy_mark, direction)}.collect()
 
     println(fuzzyset_directions.length)
@@ -55,13 +80,13 @@ object FPGrowth {
         val sessn_plds = ls.map(_._5.get)
         val sliced_plds = sessn_plds.map{
           pld =>
-            List.range(0, pld.length - 3).map(x => String.valueOf(pld.slice(x, x+3).map(x => Character.toChars(x & 0x00ff)).flatten)) toArray
+            List.range(0, pld.length - n).map(x => String.valueOf(pld.slice(x, x+n).map(x => Character.toChars(x & 0x00ff)).flatten)) toArray
         } toArray
         val words_propotion = sliced_plds
           .flatten
           .groupBy(x => x)
           .map{case(k, its) => (k, its.length.toDouble / sessn_plds.length.toDouble)}
-          .filter(x => x._2 >= 0.5 && x._2 <= 1.0)
+          //.filter(x => x._2 >= 0.5 && x._2 <= 2.0)
           .toArray
 
         ((fuzzyset_mark, direction), words_propotion)
@@ -72,38 +97,32 @@ object FPGrowth {
         val fuzzyset_direction_rdd = sessn_rdd.filter{
           case(m, _) =>
             m == mark
-        }.map(_._2.map(_._1)).sample(false, 0.05)
+        }.map(_._2.map(_._1)) //.sample(false, 0.05)
 
-        println("datas: ")
-        println(s"length: ${fuzzyset_direction_rdd.count()}")
-        println("[\n")
-        fuzzyset_direction_rdd.collect.foreach{
-          x =>
-            println("\t" + x.map(x => repr_string(x)).mkString("[", ",", "]"))
-        }
-        println("]\n")
+        println(fuzzyset_direction_rdd.count())
+        println(fuzzyset_direction_rdd.map(x => x.length).collect.toList)
 
         val fpg = new FPGrowth()
           .setMinSupport(0.2)
-          .setNumPartitions(10)
+          .setNumPartitions(16)
 
         val rowkey = MessageDigest.getInstance("MD5").digest(mark._1.toByteArray)
 
-        (rowkey, fpg.run(fuzzyset_direction_rdd))
+        (rowkey, fpg.run(fuzzyset_direction_rdd), mark._2)
     }
 
     models.foreach{
-      case (_, model) =>
-        println(s"model: $model")
+      case (_, model, direction) =>
+        println(s"model: $model direction: $direction")
 
-        model.freqItemsets.take(100).foreach{
+        model.freqItemsets.take(1).foreach{
           itemset =>
             println(itemset.items.map(x => repr_string(x)).mkString("[", ",", "]") + ","+ itemset.freq)
         }
     }
 
-    val fuzzyset_keywords = models.map{
-      case(rowkey, model) =>
+    val fuzzyset_keywords_direction = models.map{
+      case(rowkey, model, direction) =>
         val freq_words = model.freqItemsets.take(10).toList
         val keywords = freq_words.map{
           freq_set =>
@@ -113,15 +132,24 @@ object FPGrowth {
         (rowkey,
           keywords
             .map(x => java.util.Base64.getEncoder.encodeToString(stringToByteArray(x)))
-            .mkString(",")
+            .mkString(","),
+          direction
         )
     }
+
+    val fuzzyset_keywords = fuzzyset_keywords_direction.groupBy(x => BigInt(x._1)).map{
+      case(_, it) =>
+        val forward = it.filter(_._3 == "forward")(0)
+        val back = it.filter(_._3 == "back")(0)
+
+        (forward._1, forward._2, back._2)
+    }.toList
 
     val save_rdd = sparkSession.sparkContext.parallelize(fuzzyset_keywords)
 
     save_rdd.toHBaseTable(save_table)
-      .toColumns("keywords")
-      .inColumnFamily("avg")
+      .toColumns("fkeywords", "bkeywords")
+      .inColumnFamily("fzset")
       .save()
 
     sparkSession.close()

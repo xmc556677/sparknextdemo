@@ -143,43 +143,30 @@ object ExtractTCPSessionM2 {
                 }
             } distinct
 
-            val tcp_mark_seq = (
-              (handshakes_ts_seq map (x => (0, x))) ++ (stop_seq map (x => (1, x))) ) sortBy (_._2)
+            val tcp_marks = (handshakes_ts_seq map (x => (0, x))) ++ (stop_seq map (x => (1, x))) //++ List((0, BigInt(0)), (1, BigInt(Array(0x00.toByte) ++ Array.fill(8)(0xff.toByte))))
 
-            val result = items.foldLeft((List.empty[(Array[Byte], Option[Array[Byte]], Array[Byte], Array[Byte])], tcp_mark_seq)){
-              case((result, ts_seq), item) =>
-                val rowkey = item._9
-                val ts = item._3
-                val mark_b = item._2
-                val ts_b = item._11
-                val rawpacket = item._10
+            val tcp_mark_seq = tcp_marks sortBy (_._2)
 
-                ts_seq match {
-                  case Nil =>
-                    ((rowkey, None, ts_b, rawpacket) :: result, ts_seq)
-                  case (_, first) :: _ if (ts < first) =>
-                    ((rowkey, None, ts_b, rawpacket) :: result, ts_seq)
-                  case (1, _) :: (0, first) :: _ if first == ts =>
-                    ((rowkey, Some(mark_b ++ ensureXByte(first.toByteArray, 8)), ts_b, rawpacket) :: result, ts_seq.drop(1))
-                  case (1, _) :: _ =>
-                    ((rowkey, None, ts_b, rawpacket) :: result, ts_seq.drop(1))
-                  case (0, first) :: Nil if ts >= first =>
-                    ((rowkey, Some(mark_b ++ ensureXByte(first.toByteArray, 8)), ts_b, rawpacket) :: result, ts_seq)
+            val tail = if (tcp_mark_seq.isEmpty) List.empty else tcp_mark_seq.tail
+            //val tail = tcp_mark_seq.tail
 
+            val tcp_range_seq = tcp_mark_seq zip tail filter {
+              case((0, _), (1, _)) => true
+              case((0, _), (0, _)) => true
+              case _ => false
+            } map {case((_, ts_b), (_, ts_s)) => (ts_b, ts_s)}
 
-                  case (0, first) :: (1, second) :: _ if (ts >= first && ts < second) =>
-                    ((rowkey, Some(mark_b ++ ensureXByte(first.toByteArray, 8)), ts_b, rawpacket) :: result, ts_seq)
-                  case (0, first) :: (1, second) :: _  =>
-                    ((rowkey, None, ts_b, rawpacket) :: result, ts_seq.drop(1))
-
-                  case (0, first) :: (0, second) :: _ if (ts >= first && ts < second) =>
-                    ((rowkey, Some(mark_b ++ ensureXByte(first.toByteArray, 8)), ts_b, rawpacket) :: result, ts_seq)
-                  case (0, first) :: (0, second) :: _ =>
-                    ((rowkey, Some(mark_b ++ ensureXByte(second.toByteArray, 8)), ts_b, rawpacket) :: result, ts_seq.drop(1))
-                }
+            val resultt = tcp_range_seq.map{
+              case(ts_b, ts_s) =>
+                val items_in_range = items.filter(item => item._3 >= ts_b && item._3 <= ts_s)
+                val head_item_ts = items_in_range.head._3
+                items_in_range.map(
+                  item => (item._9, item._2 ++ ensureXByte(head_item_ts.toByteArray, 8), item._11, item._10)
+                )
             }
 
-            result._1.filter(_._2 != None).map(x => (x._1, x._2.get, x._3, x._4))
+            resultt.flatten
+
         }
 
     val saved_rdd = sessions_list_rdd.flatMap(x => x)

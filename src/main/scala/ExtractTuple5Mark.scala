@@ -17,7 +17,7 @@ object ExtractTuple5Mark {
 
   def main(args: Array[String]): Unit = {
     val sparkSession = SparkSession.builder()
-      .appName("ExtractSession")
+      .appName("ExtractTuple5Mark")
       .getOrCreate()
 
     val input_table = args(0)
