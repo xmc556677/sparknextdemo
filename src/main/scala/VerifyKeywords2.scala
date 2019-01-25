@@ -7,6 +7,7 @@ import cc.xmccc.sparkdemo.schema.ProtoModelTable
 import it.nerdammer.spark.hbase._
 import org.apache.hadoop.hbase.util.Bytes
 import org.apache.spark.sql.SparkSession
+import cc.xmccc.sparkdemo.Utils.repr_string
 
 import scala.util.Try
 
@@ -54,6 +55,7 @@ object VerifyKeywords2 {
         Integer.parseInt(hex, 16).toByte
     }.toArray
 
+
     val models = sparkSession.sparkContext.hbaseTable[(Array[Byte], Option[Array[Byte]], Option[Array[String]], Option[Array[(Double, Double)]], Option[String], Option[String])](input_table)
       .select("id", "features_name", "features_value", "fkeywords", "bkeywords")
       .inColumnFamily("model")
@@ -82,50 +84,16 @@ object VerifyKeywords2 {
     val forward_plds_rdd = plds_direction_rdd.filter(_._1 == "forward").map(_._2)
     val back_plds_rdd = plds_direction_rdd.filter(_._1 == "back").map(_._2)
 
-    val forward_result = forward_plds_rdd.map {
-      pld =>
-        val result = models.map {
-          row =>
-            val fkeywords = row.fkeywords.get.split(",").map(x => Base64.getDecoder.decode(x)).toList.filter(_.length >= 1)
+    models.foreach{
+      row =>
+        val fkeywords = row.fkeywords.get.split(",").map(x => Base64.getDecoder.decode(x)).toList.filter(_.length >= 1)
+        val bkeywords = row.bkeywords.get.split(",").map(x => Base64.getDecoder.decode(x)).toList.filter(_.length >= 1)
 
-            val match_result = fkeywords.map {
-              kw =>
-                pld.containsSlice(kw)
-            }
+        println(Bytes.toString(row.rowkey))
+        println(s"fkeywords: ${repr_string(fkeywords.map(x => Bytes.toString(x)).mkString(","))}")
+        println(s"bkeywords: ${repr_string(bkeywords.map(x => Bytes.toString(x)).mkString(","))}")
+    }
 
-            val accurancy = match_result.filter(x => x).length / match_result.length.toDouble
-            (Bytes.toString(row.rowkey), accurancy)
-        }.maxBy(_._2)
-
-      result._1
-    }.filter(x => x == dest_proto)
-      //}.groupBy(x => x).map(item => (item._1, item._2.toList.length)).collect().toList
-
-    val back_result = back_plds_rdd.map {
-      pld =>
-        val result = models.map {
-          row =>
-            val bkeywords = row.bkeywords.get.split(",").map(x => Base64.getDecoder.decode(x)).toList.filter(_.length >= 1)
-
-            val match_result = bkeywords.map {
-              kw =>
-                pld.containsSlice(kw)
-            }
-
-            val accurancy = match_result.filter(x => x).length / match_result.length.toDouble
-            (Bytes.toString(row.rowkey), accurancy)
-        }.maxBy(_._2)
-
-      result._1
-    }.filter(x => x == dest_proto)
-    //}.groupBy(x => x).map(item => (item._1, item._2.toList.length)).collect().toList
-
-    //println(s"forward: ${forward_result}")
-    //println(s"back: ${back_result}")
-    val forward_accurancy = forward_result.count() / forward_plds_rdd.count().toDouble
-    val back_accurancy = back_result.count() / back_plds_rdd.count().toDouble
-
-    println(s"${dest_proto}\t${forward_accurancy}\t${back_accurancy}")
 
     sparkSession.close()
   }

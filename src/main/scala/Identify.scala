@@ -25,10 +25,10 @@ object Identify {
       .select("sport", "dport", "direction", "m", "sid", "features_name", "features_value")
       .inColumnFamily("sessn")
 
-    val model_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Option[Array[Byte]], Option[Array[String]], Option[Array[(Double, Double)]], Option[String])](input_table2)
-      .select("id", "features_name", "features_value", "keywords")
+    val model_rdd = sparkSession.sparkContext.hbaseTable[(Array[Byte], Option[Array[Byte]], Option[Array[String]], Option[Array[(Double, Double)]], Option[String], Option[String])](input_table2)
+      .select("id", "features_name", "features_value", "fkeywords", "bkeywords")
       .inColumnFamily("model")
-      .map(item => ProtoModelTable(item._1, item._2, item._3, item._4, item._5))
+      .map(item => ProtoModelTable(item._1, item._2, item._3, item._4, item._5, item._6))
 
     val session_row = session_table_rdd
       .filter(row => BigInt(row.rowkey) == BigInt(session_id_b))
